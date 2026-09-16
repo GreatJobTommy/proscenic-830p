@@ -10,10 +10,11 @@
       },
       "login": {
         "title": "ProscenicHome",
-        "description": "Dieselbe E-Mail/Passwort wie in der ProscenicHome-App (EU für Europe/Berlin).",
+        "description": "ProscenicHome E-Mail oder Handynummer und das App-Passwort. Deutschland = Ländercode 49. Nur-Apple-Login braucht in der App eine gebundene E-Mail/Passwort.",
         "data": {
-          "username": "E-Mail",
+          "username": "E-Mail oder Handy",
           "password": "Passwort",
+          "country_code": "Ländercode",
           "region": "Tuya-Region"
         }
       },

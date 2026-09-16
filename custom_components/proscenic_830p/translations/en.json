@@ -10,10 +10,11 @@
       },
       "login": {
         "title": "ProscenicHome",
-        "description": "Same email/password as the ProscenicHome app (EU for Europe/Berlin).",
+        "description": "ProscenicHome email or phone plus the app password. Germany = country code 49. Apple-only login needs an email/password bound in the app.",
         "data": {
-          "username": "Email",
+          "username": "Email or phone",
           "password": "Password",
+          "country_code": "Country code",
           "region": "Tuya region"
         }
       },

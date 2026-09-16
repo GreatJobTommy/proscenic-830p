@@ -129,6 +129,18 @@ def as_list(result: Any) -> list[Any]:
     return []
 
 
+def looks_like_email(username: str) -> bool:
+    return "@" in username.strip()
+
+
+def normalize_mobile(username: str, country_code: str) -> str:
+    digits = "".join(c for c in username if c.isdigit())
+    cc = "".join(c for c in country_code if c.isdigit())
+    if cc and digits.startswith(cc):
+        digits = digits[len(cc) :]
+    return digits.lstrip("0")
+
+
 def group_id_of(group: Any) -> str:
     if not isinstance(group, dict):
         return str(group)
@@ -204,17 +216,22 @@ class ProscenicOemApi:
         password: str,
         region: str = DEFAULT_REGION,
         http_post: HttpPost | None = None,
+        country_code: str = "49",
     ) -> None:
-        self._username = username
+        self._username = username.strip()
         self._password = password
+        self._country_code = (country_code or "49").strip().lstrip("+")
         self._endpoint = f"https://a1.tuya{region}.com/api.json"
         self._http_post = http_post
         self._sid: str | None = None
 
     def login(self) -> str:
-        # One country code only — spraying 49/43/41/... hits Tuya rate limits
-        # and surfaces as a generic HA error.
-        self._sid = self._login_email("")
+        # German ProscenicHome accounts need countryCode 49; empty code
+        # often comes back as USER_PASSWD_WRONG.
+        if looks_like_email(self._username):
+            self._sid = self._login_email(self._country_code)
+        else:
+            self._sid = self._login_mobile(self._country_code)
         return self._sid
 
     def _login_email(self, country_code: str) -> str:
@@ -228,6 +245,29 @@ class ProscenicOemApi:
             {
                 "countryCode": country_code,
                 "email": self._username,
+                "ifencrypt": 1,
+                "options": '{"group": 1}',
+                "passwd": encrypt_password(
+                    token_info["publicKey"], token_info["exponent"], self._password
+                ),
+                "token": token_info["token"],
+            },
+            requires_sid=False,
+        )
+        return str(login_info["sid"])
+
+    def _login_mobile(self, country_code: str) -> str:
+        mobile = normalize_mobile(self._username, country_code)
+        token_info = self._api(
+            "tuya.m.user.mobile.token.create",
+            {"countryCode": country_code, "mobile": mobile},
+            requires_sid=False,
+        )
+        login_info = self._api(
+            "tuya.m.user.mobile.password.login",
+            {
+                "countryCode": country_code,
+                "mobile": mobile,
                 "ifencrypt": 1,
                 "options": '{"group": 1}',
                 "passwd": encrypt_password(
@@ -299,7 +339,7 @@ class ProscenicOemApi:
         if not body.get("success"):
             code = body.get("errorCode")
             msg = body.get("errorMsg") or code or "oem api error"
-            if code in {"USER_PASSWD_WRONG", "USER_SESSION_INVALID"}:
+            if code == "USER_PASSWD_WRONG":
                 raise InvalidAuthentication(str(msg))
             if str(code) in _RATE_LIMIT_CODES:
                 raise RateLimited(f"{msg} ({code})")
@@ -349,11 +389,18 @@ def discover_830p(
     uuid: str | None = None,
     http_post: HttpPost | None = None,
     hosts_by_gwid: Mapping[str, str] | None = None,
+    country_code: str = "49",
 ) -> dict[str, str]:
     """Login to ProscenicHome, return LAN config (password is not returned)."""
     from .constants import KNOWN_DEVICE_ID, KNOWN_UUID  # noqa: PLC0415
 
-    api = ProscenicOemApi(email, password, region=region, http_post=http_post)
+    api = ProscenicOemApi(
+        email,
+        password,
+        region=region,
+        http_post=http_post,
+        country_code=country_code,
+    )
     api.login()
     devices = api.list_devices()
     found = pick_vacuum(

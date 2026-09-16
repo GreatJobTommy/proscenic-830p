@@ -10,6 +10,25 @@ from proscenic_830p.oem_cloud import (
     sign_request,
 )
 
+SCHLURP_D600 = {
+    "name": "schlurp",
+    "devId": "bfschlurp830pxxxxxx",
+    "localKey": "schlurplocalkey99",
+    "uuid": "cccccccccccccccc",
+    "productId": "d600pidxxxxxxxx",
+    "productName": "D600",
+    "category": "sd",
+}
+
+PLUG = {
+    "name": "Steckdose",
+    "devId": "bfplugxxxxxxxxxxxx",
+    "localKey": "pluglocalkeyplug1",
+    "uuid": "dddddddddddddddd",
+    "productId": "plugpid",
+    "category": "cz",
+}
+
 
 def test_known_830p_identity() -> None:
     assert KNOWN_DEVICE_ID == "bf4d77d05964608b34enbm"
@@ -105,6 +124,63 @@ def test_rate_limit_is_not_no_device_and_does_not_spray_countries() -> None:
     assert "tuya.m.user.email.password.login" not in calls
 
 
+def test_login_sends_german_country_code_on_email() -> None:
+    import json
+
+    seen: list[tuple[str, str]] = []
+
+    def http_post(url, params=None, data=None):
+        action = params["a"]
+        payload = json.loads(data["postData"]) if data and data.get("postData") else {}
+        seen.append((action, str(payload.get("countryCode", ""))))
+        if action == "tuya.m.user.email.token.create":
+            return {
+                "success": True,
+                "result": {"publicKey": "65537", "exponent": "65537", "token": "tok"},
+            }
+        if action == "tuya.m.user.email.password.login":
+            return {"success": True, "result": {"sid": "sid-1"}}
+        if action == "tuya.m.location.list":
+            return {"success": True, "result": [{"groupId": "g1"}]}
+        if action == "tuya.m.my.group.device.list":
+            return {"success": True, "result": [SCHLURP_D600]}
+        raise AssertionError(action)
+
+    discover_830p("tommyra@gmx.de", "pw", http_post=http_post, country_code="49")
+    assert ("tuya.m.user.email.token.create", "49") in seen
+    assert ("tuya.m.user.email.password.login", "49") in seen
+
+
+def test_phone_username_uses_mobile_login() -> None:
+    import json
+
+    actions: list[str] = []
+
+    def http_post(url, params=None, data=None):
+        action = params["a"]
+        actions.append(action)
+        payload = json.loads(data["postData"]) if data and data.get("postData") else {}
+        if action == "tuya.m.user.mobile.token.create":
+            assert payload.get("countryCode") == "49"
+            assert payload.get("mobile") == "17612345678"
+            return {
+                "success": True,
+                "result": {"publicKey": "65537", "exponent": "65537", "token": "tok"},
+            }
+        if action == "tuya.m.user.mobile.password.login":
+            return {"success": True, "result": {"sid": "sid-1"}}
+        if action == "tuya.m.location.list":
+            return {"success": True, "result": [{"groupId": "g1"}]}
+        if action == "tuya.m.my.group.device.list":
+            return {"success": True, "result": [SCHLURP_D600]}
+        raise AssertionError(action)
+
+    cfg = discover_830p("0176 12345678", "pw", http_post=http_post, country_code="49")
+    assert cfg["name"] == "schlurp"
+    assert "tuya.m.user.mobile.token.create" in actions
+    assert "tuya.m.user.email.password.login" not in actions
+
+
 def test_oem_wrong_password() -> None:
     def http_post(url, params=None, data=None):
         if params["a"] == "tuya.m.user.email.token.create":
@@ -184,26 +260,6 @@ def _oem_http(devices: list[dict]) -> callable:
         raise AssertionError(action)
 
     return http_post
-
-
-SCHLURP_D600 = {
-    "name": "schlurp",
-    "devId": "bfschlurp830pxxxxxx",
-    "localKey": "schlurplocalkey99",
-    "uuid": "cccccccccccccccc",
-    "productId": "d600pidxxxxxxxx",
-    "productName": "D600",
-    "category": "sd",
-}
-
-PLUG = {
-    "name": "Steckdose",
-    "devId": "bfplugxxxxxxxxxxxx",
-    "localKey": "pluglocalkeyplug1",
-    "uuid": "dddddddddddddddd",
-    "productId": "plugpid",
-    "category": "cz",
-}
 
 
 def test_discover_accepts_schlurp_listed_as_d600() -> None:

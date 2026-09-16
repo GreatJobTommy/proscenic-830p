@@ -19,6 +19,7 @@ from .oem_cloud import InvalidAuthentication, ProscenicOemError, RateLimited, di
 CONF_DEVICE_ID = "device_id"
 CONF_REGION = "region"
 CONF_NAME = "name"
+CONF_COUNTRY_CODE = "country_code"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -58,10 +59,12 @@ class Proscenic830PConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         user_input[CONF_USERNAME],
                         user_input[CONF_PASSWORD],
                         region=user_input.get(CONF_REGION, "eu"),
+                        country_code=str(user_input.get(CONF_COUNTRY_CODE, "49")),
                         device_id=KNOWN_DEVICE_ID,
                     )
                 )
-            except InvalidAuthentication:
+            except InvalidAuthentication as err:
+                _LOGGER.warning("ProscenicHome auth rejected: %s", err)
                 errors["base"] = "invalid_auth"
             except RateLimited as err:
                 _LOGGER.warning("ProscenicHome rate limited: %s", err)
@@ -85,6 +88,7 @@ class Proscenic830PConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_USERNAME): str,
                     vol.Required(CONF_PASSWORD): str,
+                    vol.Optional(CONF_COUNTRY_CODE, default="49"): str,
                     vol.Optional(CONF_REGION, default="eu"): vol.In(["eu", "us", "cn", "in"]),
                 }
             ),
