@@ -21,6 +21,10 @@ KNOWN_MAC = "68:57:2d:87:87:e9"
 KNOWN_PRODUCT_KEY = "ofqlgafdltzahwlh"
 DEFAULT_RESOLUTION_MM = 50
 BUMPER_STAMP_RADIUS_MM = 60
+# Kartierung pass: 100 mm posts must span more than one cell per axis.
+MAPPING_RESOLUTION_MM = 25
+MAPPING_BUMPER_STAMP_MM = 40
+DOCK_MARKER_RADIUS_MM = 80
 
 
 def can_climb(step_mm: float) -> bool:

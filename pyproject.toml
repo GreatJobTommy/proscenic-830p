@@ -26,6 +26,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 proscenic-830p-map = "proscenic_830p.launch_map:main"
+proscenic-830p-kartierung = "proscenic_830p.launch_kartierung:main"
 
 [project.urls]
 Homepage = "https://github.com/GreatJobTommy/proscenic-830p"

@@ -108,6 +108,16 @@ vacuum:
 
 Extra services: `wall_follow`, `single_room`, `mop`, `remote_control`.
 
+## Kartierung pass
+
+A dedicated mapping mode starts at the dock, drives a pose+bumper stream, and builds a **25 mm** occupancy grid (a 100 mm wooden post spans multiple cells on both axes). Occupied bumper hits stay occupied; unknown cells are never flood-filled into floor. After the first hit the drive policy backs off and **re-approaches from a second heading** (circumnavigate) instead of only turning left.
+
+```bash
+python -m proscenic_830p.launch_kartierung tests/fixtures/kartierung_post.json
+```
+
+Output lists `DOCK_CELL` (charging station / start pose) and `OCCUPIED_CELL` (sticky obstacles). Two runs of the same fixture are identical.
+
 ## Occupancy CLI
 
 ```bash

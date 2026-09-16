@@ -1,0 +1,35 @@
+{
+  "resolution_mm": 25,
+  "origin_x_mm": 0,
+  "origin_y_mm": 0,
+  "width_cells": 80,
+  "height_cells": 60,
+  "bumper_stamp_radius_mm": 40,
+  "dock": {"x_mm": 200, "y_mm": 500, "heading_deg": 0},
+  "post": {"xmin": 850, "xmax": 950, "ymin": 450, "ymax": 550},
+  "meta": {
+    "description": "Dock at 200,500. 100x100 mm Holzpfosten at 850..950 x 450..550. First bumper heading 0 (west face), then drive around, second bumper heading 270 (north face).",
+    "post_size_mm": 100,
+    "first_hit_pose_mm": [685, 500],
+    "first_hit_heading_deg": 0,
+    "second_hit_pose_mm": [900, 715],
+    "second_hit_heading_deg": 270,
+    "corridor_mm": [900, 800],
+    "unvisited_mm": [1800, 1400]
+  },
+  "samples": [
+    {"x_mm": 200, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 350, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 500, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 600, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 685, "y_mm": 500, "heading_deg": 0, "bumper": true},
+    {"x_mm": 500, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 500, "y_mm": 650, "heading_deg": 90, "bumper": false},
+    {"x_mm": 500, "y_mm": 800, "heading_deg": 90, "bumper": false},
+    {"x_mm": 700, "y_mm": 800, "heading_deg": 0, "bumper": false},
+    {"x_mm": 900, "y_mm": 800, "heading_deg": 0, "bumper": false},
+    {"x_mm": 900, "y_mm": 715, "heading_deg": 270, "bumper": true},
+    {"x_mm": 1100, "y_mm": 800, "heading_deg": 0, "bumper": false},
+    {"x_mm": 1100, "y_mm": 500, "heading_deg": 270, "bumper": false}
+  ]
+}

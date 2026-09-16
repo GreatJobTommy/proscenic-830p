@@ -19,6 +19,7 @@ from .constants import (
     BODY_RADIUS_MM,
     BUMPER_STAMP_RADIUS_MM,
     DEFAULT_RESOLUTION_MM,
+    DOCK_MARKER_RADIUS_MM,
 )
 
 
@@ -60,6 +61,7 @@ class ScanReport:
     occupied_cells: tuple[tuple[int, int], ...]
     free_cells: tuple[tuple[int, int], ...]
     by_label: dict[Cell, int]
+    dock_cells: tuple[tuple[int, int], ...] = ()
 
 
 class OccupancyGrid:
@@ -70,16 +72,41 @@ class OccupancyGrid:
         origin_y_mm: float = 0.0,
         width_cells: int = 80,
         height_cells: int = 40,
+        bumper_stamp_radius_mm: float = BUMPER_STAMP_RADIUS_MM,
     ) -> None:
         self.resolution_mm = int(resolution_mm)
         self.origin_x_mm = float(origin_x_mm)
         self.origin_y_mm = float(origin_y_mm)
         self.width_cells = int(width_cells)
         self.height_cells = int(height_cells)
+        self.bumper_stamp_radius_mm = float(bumper_stamp_radius_mm)
+        self.dock_pose: tuple[float, float, float] | None = None
+        self._dock_cells: set[tuple[int, int]] = set()
         self._cells: list[list[Cell]] = [
             [Cell.UNKNOWN for _ in range(self.width_cells)]
             for _ in range(self.height_cells)
         ]
+
+    @property
+    def dock_cells(self) -> set[tuple[int, int]]:
+        return set(self._dock_cells)
+
+    def mark_dock(self, x_mm: float, y_mm: float, heading_deg: float = 0.0) -> None:
+        """Record the charging station / start pose. Does not flood occupancy."""
+        self.dock_pose = (float(x_mm), float(y_mm), float(heading_deg))
+        radius = DOCK_MARKER_RADIUS_MM
+        radius_sq = radius * radius
+        i_min = math.floor((x_mm - radius - self.origin_x_mm) / self.resolution_mm)
+        i_max = math.floor((x_mm + radius - self.origin_x_mm) / self.resolution_mm)
+        j_min = math.floor((y_mm - radius - self.origin_y_mm) / self.resolution_mm)
+        j_max = math.floor((y_mm + radius - self.origin_y_mm) / self.resolution_mm)
+        for j in range(j_min, j_max + 1):
+            for i in range(i_min, i_max + 1):
+                if not self.in_bounds(i, j):
+                    continue
+                cx, cy = self.cell_center(i, j)
+                if (cx - x_mm) ** 2 + (cy - y_mm) ** 2 <= radius_sq:
+                    self._dock_cells.add((i, j))
 
     def in_bounds(self, i: int, j: int) -> bool:
         return 0 <= i < self.width_cells and 0 <= j < self.height_cells
@@ -114,7 +141,7 @@ class OccupancyGrid:
         rad = math.radians(heading_deg)
         contact_x = x_mm + BODY_RADIUS_MM * math.cos(rad)
         contact_y = y_mm + BODY_RADIUS_MM * math.sin(rad)
-        self._stamp(contact_x, contact_y, BUMPER_STAMP_RADIUS_MM, Cell.OCCUPIED)
+        self._stamp(contact_x, contact_y, self.bumper_stamp_radius_mm, Cell.OCCUPIED)
 
     def observe(self, sample: PoseSample) -> None:
         self.mark_free_body(sample.x_mm, sample.y_mm, sample.heading_deg)
@@ -159,14 +186,20 @@ class OccupancyGrid:
                 Cell.OCCUPIED: len(occupied_cells_t),
                 Cell.UNKNOWN: unknown,
             },
+            dock_cells=tuple(sorted(self._dock_cells)),
         )
 
     def ascii_lines(self) -> list[str]:
         glyphs = {Cell.UNKNOWN: "?", Cell.FREE: ".", Cell.OCCUPIED: "#"}
         lines = []
         for j in range(self.height_cells - 1, -1, -1):
-            row = "".join(glyphs[self._cells[j][i]] for i in range(self.width_cells))
-            lines.append(row)
+            chars = []
+            for i in range(self.width_cells):
+                if (i, j) in self._dock_cells and self._cells[j][i] is not Cell.OCCUPIED:
+                    chars.append("D")
+                else:
+                    chars.append(glyphs[self._cells[j][i]])
+            lines.append("".join(chars))
         return lines
 
     def _stamp(self, x_mm: float, y_mm: float, radius_mm: float, value: Cell) -> None:
