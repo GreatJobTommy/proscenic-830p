@@ -1,0 +1,34 @@
+{
+  "resolution_mm": 50,
+  "origin_x_mm": 0,
+  "origin_y_mm": 0,
+  "width_cells": 50,
+  "height_cells": 40,
+  "meta": {
+    "description": "Drive +x, bumper a furniture edge, then squeeze under that edge and also pass beside it. Unknown must stay unknown.",
+    "obstacle_world_mm": [1065, 500],
+    "squeeze_under_pose_mm": [1065, 500],
+    "squeeze_past_pose_mm": [1065, 900],
+    "unvisited_world_mm": [2000, 1500],
+    "path_center_mm": [500, 500]
+  },
+  "samples": [
+    {"x_mm": 200, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 350, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 500, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 650, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 800, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 900, "y_mm": 500, "heading_deg": 0, "bumper": true},
+    {"x_mm": 1000, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 1100, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 1200, "y_mm": 500, "heading_deg": 0, "bumper": false},
+    {"x_mm": 200, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 350, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 500, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 650, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 800, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 950, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 1100, "y_mm": 900, "heading_deg": 0, "bumper": false},
+    {"x_mm": 1200, "y_mm": 900, "heading_deg": 0, "bumper": false}
+  ]
+}

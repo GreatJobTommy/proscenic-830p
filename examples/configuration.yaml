@@ -1,0 +1,9 @@
+# Example Home Assistant snippet for a Proscenic 830P on Tuya LAN 6668.
+# device_id and local_key come from tinytuya wizard / Tuya cloud, not from Alexa.
+
+vacuum:
+  - platform: proscenic_830p
+    host: 192.168.1.50
+    device_id: YOUR_DEVICE_ID
+    local_key: YOUR_LOCAL_KEY
+    name: Saugroboter

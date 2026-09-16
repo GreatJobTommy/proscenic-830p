@@ -1,0 +1,271 @@
+"""Home Assistant vacuum entity that delegates to VacuumController.
+
+Works without Home Assistant installed: tests and the CLI use this class
+directly. When HA is present, async_setup_platform wires tinytuya LAN I/O.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Mapping
+
+from .adapter import TuyaLanAdapter
+from .constants import FIRMWARE_MAIN, FIRMWARE_MCU, WIFI_BAND_GHZ
+from .controller import VacuumController
+from .protocol import FanSpeed, Fault, decode_status, ha_state
+
+SendDps = Callable[[Mapping[str, object]], object]
+
+try:
+    from homeassistant.components.vacuum import (  # type: ignore
+        PLATFORM_SCHEMA as VACUUM_PLATFORM_SCHEMA,
+        StateVacuumEntity,
+        VacuumEntityFeature,
+    )
+    from homeassistant.const import CONF_DEVICE_ID, CONF_HOST, CONF_NAME  # type: ignore
+    import homeassistant.helpers.config_validation as cv  # type: ignore
+    import voluptuous as vol  # type: ignore
+
+    PLATFORM_SCHEMA = VACUUM_PLATFORM_SCHEMA.extend(
+        {
+            vol.Required(CONF_HOST): cv.string,
+            vol.Required(CONF_DEVICE_ID): cv.string,
+            vol.Required("local_key"): vol.All(cv.string, vol.Length(min=15, max=16)),
+            vol.Optional(CONF_NAME, default="Proscenic 830P"): cv.string,
+        }
+    )
+    _HA = True
+    _FEATURES = (
+        VacuumEntityFeature.STATE
+        | VacuumEntityFeature.START
+        | VacuumEntityFeature.PAUSE
+        | VacuumEntityFeature.STOP
+        | VacuumEntityFeature.RETURN_HOME
+        | VacuumEntityFeature.FAN_SPEED
+        | VacuumEntityFeature.BATTERY
+        | VacuumEntityFeature.CLEAN_SPOT
+        | VacuumEntityFeature.SEND_COMMAND
+    )
+except ImportError:
+    _HA = False
+    PLATFORM_SCHEMA = None
+
+    class StateVacuumEntity:  # type: ignore[no-redef]
+        """Stand-in so the entity imports without Home Assistant."""
+
+    class VacuumEntityFeature:  # type: ignore[no-redef]
+        STATE = START = PAUSE = STOP = RETURN_HOME = FAN_SPEED = BATTERY = 0
+        CLEAN_SPOT = SEND_COMMAND = 0
+
+    _FEATURES = 0
+
+
+class Proscenic830PVacuum(StateVacuumEntity):
+    """Vacuum entity API used by HA and by tests."""
+
+    _attr_should_poll = True
+    _attr_supported_features = _FEATURES
+    _attr_fan_speed_list = [item.value for item in FanSpeed]
+
+    def __init__(
+        self,
+        name: str,
+        controller: VacuumController,
+        unique_id: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._attr_name = name
+        self._controller = controller
+        self._attr_unique_id = unique_id
+        self._status = None
+        self._available = True
+
+    @property
+    def name(self) -> str:
+        return self._attr_name
+
+    @property
+    def unique_id(self) -> str | None:
+        return self._attr_unique_id
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    @property
+    def supported_features(self) -> int:
+        return self._attr_supported_features
+
+    @property
+    def fan_speed_list(self) -> list[str]:
+        return list(self._attr_fan_speed_list)
+
+    @property
+    def controller(self) -> VacuumController:
+        return self._controller
+
+    def start(self) -> dict[str, object]:
+        return self._controller.start()
+
+    def pause(self) -> dict[str, object]:
+        return self._controller.pause()
+
+    def stop(self, **kwargs: Any) -> dict[str, object]:
+        del kwargs
+        return self._controller.stop()
+
+    def return_to_base(self, **kwargs: Any) -> dict[str, object]:
+        del kwargs
+        return self._controller.dock()
+
+    def clean_spot(self, **kwargs: Any) -> dict[str, object]:
+        del kwargs
+        return self._controller.spot()
+
+    def set_fan_speed(self, fan_speed: str, **kwargs: Any) -> dict[str, object]:
+        del kwargs
+        return self._controller.set_fan(fan_speed)
+
+    def wall_follow(self) -> dict[str, object]:
+        return self._controller.wall_follow()
+
+    def single_room(self) -> dict[str, object]:
+        return self._controller.single_room()
+
+    def mop(self) -> dict[str, object]:
+        return self._controller.mop()
+
+    def send_command(self, command: str, params: dict | None = None) -> dict[str, object]:
+        del params
+        key = command.lower().replace("-", "_")
+        dispatch = {
+            "start": self.start,
+            "pause": self.pause,
+            "stop": self.stop,
+            "dock": self.return_to_base,
+            "return_to_base": self.return_to_base,
+            "smart": self._controller.smart,
+            "wall_follow": self.wall_follow,
+            "single_room": self.single_room,
+            "spot": self.clean_spot,
+            "clean_spot": self.clean_spot,
+            "mop": self.mop,
+        }
+        try:
+            return dispatch[key]()
+        except KeyError as exc:
+            raise ValueError(f"unsupported command {command}") from exc
+
+    def apply_status(self, dps: Mapping[object, object]) -> None:
+        self._status = decode_status(dps)
+        self._available = True
+
+    def update(self) -> None:
+        try:
+            status = self._controller.refresh()
+            if status is not None:
+                self._status = status
+            self._available = True
+        except Exception:
+            self._available = False
+
+    @property
+    def state(self) -> str | None:
+        if self._status is None:
+            return None
+        return ha_state(self._status)
+
+    @property
+    def battery_level(self) -> int | None:
+        if self._status is None:
+            return None
+        return self._status.battery
+
+    @property
+    def fan_speed(self) -> str | None:
+        if self._status is None or self._status.fan is None:
+            return None
+        return self._status.fan.value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        attrs: dict[str, object] = {
+            "firmware_main": FIRMWARE_MAIN,
+            "firmware_mcu": FIRMWARE_MCU,
+            "wifi_ghz": WIFI_BAND_GHZ,
+        }
+        if self._status is None:
+            return attrs
+        attrs["mop_equipped"] = self._status.mop_equipped
+        attrs["faults"] = (
+            self._status.faults.name
+            if self._status.faults is not Fault.NO_ERROR
+            else None
+        )
+        if self._status.cleaned_area is not None:
+            attrs["cleaned_area"] = self._status.cleaned_area
+        if self._status.clean_time_min is not None:
+            attrs["cleaning_time"] = self._status.clean_time_min
+        return attrs
+
+    async def async_start(self) -> dict[str, object]:
+        return self.start()
+
+    async def async_pause(self) -> dict[str, object]:
+        return self.pause()
+
+    async def async_stop(self, **kwargs: Any) -> dict[str, object]:
+        return self.stop(**kwargs)
+
+    async def async_return_to_base(self, **kwargs: Any) -> dict[str, object]:
+        return self.return_to_base(**kwargs)
+
+    async def async_clean_spot(self, **kwargs: Any) -> dict[str, object]:
+        return self.clean_spot(**kwargs)
+
+    async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> dict[str, object]:
+        return self.set_fan_speed(fan_speed, **kwargs)
+
+    async def async_send_command(
+        self, command: str, params: dict | None = None, **kwargs: Any
+    ) -> dict[str, object]:
+        del kwargs
+        return self.send_command(command, params)
+
+
+def build_vacuum(
+    name: str,
+    send_dps: SendDps,
+    status_fn: Callable[[], Mapping[object, object]] | None = None,
+    unique_id: str | None = None,
+) -> Proscenic830PVacuum:
+    return Proscenic830PVacuum(
+        name=name,
+        controller=VacuumController(send_dps, status_fn=status_fn),
+        unique_id=unique_id,
+    )
+
+
+async def async_setup_platform(
+    hass: Any,
+    config: Mapping[str, Any],
+    async_add_entities: Callable[..., Any],
+    discovery_info: Any = None,
+) -> None:
+    """Home Assistant yaml platform setup (vacuum: - platform: proscenic_830p)."""
+    del hass, discovery_info
+    host = config["host"]
+    device_id = config["device_id"]
+    local_key = config["local_key"]
+    name = config.get("name", "Proscenic 830P")
+    adapter = TuyaLanAdapter(device_id, host, local_key)
+
+    def send_dps(dps: Mapping[str, object]) -> None:
+        adapter.send_dps(dps)
+
+    entity = build_vacuum(
+        name,
+        send_dps=send_dps,
+        status_fn=adapter.status_dps,
+        unique_id=device_id,
+    )
+    async_add_entities([entity], True)

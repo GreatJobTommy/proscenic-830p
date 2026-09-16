@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proscenic-830p"
+version = "0.1.0"
+description = "Local Home Assistant control and sticky occupancy mapping for the Proscenic 830P robot vacuum."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "GreatJobTommy" }]
+keywords = ["proscenic", "830P", "home-assistant", "vacuum", "tuya", "occupancy"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Home Automation",
+]
+dependencies = [
+    "tinytuya>=1.13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+proscenic-830p-map = "proscenic_830p.launch_map:main"
+
+[project.urls]
+Homepage = "https://github.com/GreatJobTommy/proscenic-830p"
+Issues = "https://github.com/GreatJobTommy/proscenic-830p/issues"
+
+[tool.setuptools.packages.find]
+include = ["proscenic_830p*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

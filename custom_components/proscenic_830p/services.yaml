@@ -1,0 +1,39 @@
+wall_follow:
+  name: Wall follow
+  description: Start wall-follow (edge) cleaning on the 830P.
+  target:
+    entity:
+      domain: vacuum
+
+single_room:
+  name: Single room
+  description: Start single-room cleaning.
+  target:
+    entity:
+      domain: vacuum
+
+mop:
+  name: Mop
+  description: Start mop mode (water tank must be fitted).
+  target:
+    entity:
+      domain: vacuum
+
+remote_control:
+  name: Remote control
+  description: Direction overlay (forward/backward/turnleft/turnright/stop).
+  target:
+    entity:
+      domain: vacuum
+  fields:
+    direction:
+      required: true
+      example: forward
+      selector:
+        select:
+          options:
+            - forward
+            - backward
+            - turnleft
+            - turnright
+            - stop

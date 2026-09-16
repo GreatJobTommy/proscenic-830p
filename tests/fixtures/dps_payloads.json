@@ -1,0 +1,100 @@
+{
+  "status_smart_cleaning": {
+    "1": true,
+    "11": 0,
+    "25": "smart",
+    "27": "normal",
+    "38": 1,
+    "39": 76,
+    "41": 12,
+    "42": 18,
+    "49": "sweep"
+  },
+  "status_paused": {
+    "11": 0,
+    "27": "ECO",
+    "38": 7,
+    "39": 54
+  },
+  "status_docked": {
+    "11": 0,
+    "27": "normal",
+    "38": 5,
+    "39": 100
+  },
+  "status_returning": {
+    "11": 0,
+    "38": 4,
+    "39": 22
+  },
+  "status_wall_follow": {
+    "11": 0,
+    "25": "wallfollow",
+    "38": 3,
+    "39": 61
+  },
+  "status_single_room": {
+    "11": 0,
+    "25": "single",
+    "38": 8,
+    "39": 70
+  },
+  "status_mopping": {
+    "11": 0,
+    "25": "mop",
+    "27": "normal",
+    "38": 2,
+    "39": 80,
+    "49": "mop"
+  },
+  "status_fault_bumper": {
+    "11": 64,
+    "38": 7,
+    "39": 40
+  },
+  "status_fault_cliff": {
+    "11": 32,
+    "38": 0,
+    "39": 40
+  },
+  "status_fault_trapped": {
+    "11": 512,
+    "38": 0,
+    "39": 33
+  },
+  "status_fault_dustbin": {
+    "11": 16,
+    "38": 0,
+    "39": 90
+  },
+  "status_fault_wheels": {
+    "11": 12,
+    "38": 0,
+    "39": 50
+  },
+  "status_fault_brushes": {
+    "11": 3,
+    "38": 0,
+    "39": 50
+  },
+  "status_fault_water_tank": {
+    "11": 128,
+    "38": 2,
+    "39": 66,
+    "49": "mop"
+  },
+  "commands": {
+    "start": {"25": "smart"},
+    "pause_resume_smart": {"25": "smart"},
+    "stop": {"26": "stop"},
+    "dock": {"25": "chargego"},
+    "smart": {"25": "smart"},
+    "wall_follow": {"25": "wallfollow"},
+    "single_room": {"25": "single"},
+    "spot": {"25": "sprial"},
+    "mop": {"25": "mop"},
+    "fan_eco": {"27": "ECO"},
+    "fan_normal": {"27": "normal"},
+    "fan_strong": {"27": "strong"}
+  }
+}
