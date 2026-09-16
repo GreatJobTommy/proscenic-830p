@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from .adapter import find_host_for_gw_id
 from .const import CONF_LOCAL_KEY, DEFAULT_NAME, DOMAIN
 from .constants import KNOWN_DEVICE_ID, TUYA_VERSION
-from .oem_cloud import InvalidAuthentication, ProscenicOemError, discover_830p
+from .oem_cloud import InvalidAuthentication, ProscenicOemError, RateLimited, discover_830p
 
 CONF_DEVICE_ID = "device_id"
 CONF_REGION = "region"
@@ -63,6 +63,9 @@ class Proscenic830PConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             except InvalidAuthentication:
                 errors["base"] = "invalid_auth"
+            except RateLimited as err:
+                _LOGGER.warning("ProscenicHome rate limited: %s", err)
+                errors["base"] = "too_frequent"
             except ProscenicOemError as err:
                 _LOGGER.warning("ProscenicHome discover failed: %s", err)
                 if "no Proscenic 830P" in str(err):

@@ -52,6 +52,17 @@ class InvalidAuthentication(ProscenicOemError):
     pass
 
 
+class RateLimited(ProscenicOemError):
+    pass
+
+
+_RATE_LIMIT_CODES = {
+    "REQUEST_TOO_FREQUENTLY_PLEASE_TRY_AGAIN_LATER",
+    "REQUEST_TOO_FREQUENTLY",
+    "REPEATED_REQUEST",
+}
+
+
 def _mobile_hash(data: str) -> str:
     prehash = hashlib.md5(data.encode("utf-8")).hexdigest()
     return prehash[8:16] + prehash[0:8] + prehash[24:32] + prehash[16:24]
@@ -201,18 +212,10 @@ class ProscenicOemApi:
         self._sid: str | None = None
 
     def login(self) -> str:
-        last_error: Exception | None = None
-        for country in ("", "49", "43", "41", "44", "1", "86"):
-            try:
-                self._sid = self._login_email(country)
-                return self._sid
-            except InvalidAuthentication:
-                raise
-            except ProscenicOemError as exc:
-                last_error = exc
-        if last_error:
-            raise last_error
-        raise ProscenicOemError("login failed")
+        # One country code only — spraying 49/43/41/... hits Tuya rate limits
+        # and surfaces as a generic HA error.
+        self._sid = self._login_email("")
+        return self._sid
 
     def _login_email(self, country_code: str) -> str:
         token_info = self._api(
@@ -298,6 +301,8 @@ class ProscenicOemApi:
             msg = body.get("errorMsg") or code or "oem api error"
             if code in {"USER_PASSWD_WRONG", "USER_SESSION_INVALID"}:
                 raise InvalidAuthentication(str(msg))
+            if str(code) in _RATE_LIMIT_CODES:
+                raise RateLimited(f"{msg} ({code})")
             raise ProscenicOemError(f"{msg} ({code})")
         return body.get("result")
 
@@ -315,6 +320,8 @@ class ProscenicOemApi:
                 extra_params=extra_params,
                 requires_sid=requires_sid,
             )
+        except RateLimited:
+            raise
         except ProscenicOemError:
             return None
 

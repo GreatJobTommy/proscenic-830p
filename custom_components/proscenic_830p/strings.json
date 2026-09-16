@@ -30,7 +30,8 @@
     "error": {
       "invalid_auth": "ProscenicHome email/password rejected",
       "no_device": "No 830P on this ProscenicHome account",
-      "cannot_connect": "ProscenicHome API error — check HA logs"
+      "cannot_connect": "ProscenicHome API error — check HA logs",
+      "too_frequent": "ProscenicHome rate limit — wait a minute, then try again"
     },
     "abort": {
       "already_configured": "This 830P is already configured"

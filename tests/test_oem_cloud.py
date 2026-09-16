@@ -3,6 +3,7 @@ from proscenic_830p.constants import KNOWN_DEVICE_ID, KNOWN_MAC, KNOWN_UUID
 from proscenic_830p.oem_cloud import (
     InvalidAuthentication,
     ProscenicOemApi,
+    RateLimited,
     as_list,
     discover_830p,
     map_cloud_device,
@@ -78,6 +79,30 @@ def test_oem_login_and_find_830p() -> None:
     assert found is not None
     assert found.local_key == "abcdef0123456789"
     assert "tuya.m.user.email.password.login" in calls
+
+
+def test_rate_limit_is_not_no_device_and_does_not_spray_countries() -> None:
+    calls: list[str] = []
+
+    def http_post(url, params=None, data=None):
+        action = params["a"]
+        calls.append(action)
+        if action == "tuya.m.user.email.token.create":
+            return {
+                "success": False,
+                "errorCode": "REQUEST_TOO_FREQUENTLY_PLEASE_TRY_AGAIN_LATER",
+                "errorMsg": "Requests are too frequent. Please try again later",
+            }
+        raise AssertionError(action)
+
+    try:
+        discover_830p("user@example.com", "pw", http_post=http_post)
+    except RateLimited as exc:
+        assert "TOO_FREQUENT" in str(exc).upper() or "frequent" in str(exc).lower()
+    else:
+        raise AssertionError("expected RateLimited")
+    assert calls.count("tuya.m.user.email.token.create") == 1
+    assert "tuya.m.user.email.password.login" not in calls
 
 
 def test_oem_wrong_password() -> None:
