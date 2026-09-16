@@ -33,6 +33,7 @@ class CloudDevice:
     product_id: str
     category: str
     dps: dict[str, Any]
+    product_name: str = ""
 
 
 class ProscenicOemError(Exception):
@@ -74,16 +75,63 @@ def encrypt_password(modulus_str: str, exponent_str: str, password: str) -> str:
     return _plain_rsa_encrypt(int(modulus_str), int(exponent_str), passwd_hash).hex()
 
 
+_VACUUM_CATEGORIES = {"sd"}
+_VACUUM_HINTS = ("schlurp", "830p", "830", "d600", "saugroboter", "vacuum", "sweeper")
+
+
 def map_cloud_device(raw: dict[str, Any]) -> CloudDevice:
+    device_id = str(raw.get("devId") or raw.get("id") or raw.get("gwId") or "")
+    local_key = str(raw.get("localKey") or raw.get("local_key") or raw.get("key") or "")
     return CloudDevice(
-        name=str(raw.get("name") or "Proscenic 830P"),
-        device_id=str(raw["devId"]),
-        local_key=str(raw["localKey"]),
+        name=str(raw.get("name") or ""),
+        device_id=device_id,
+        local_key=local_key,
         uuid=str(raw.get("uuid") or ""),
         product_id=str(raw.get("productId") or ""),
         category=str(raw.get("category") or ""),
         dps=dict(raw.get("dps") or {}),
+        product_name=str(raw.get("productName") or raw.get("model") or ""),
     )
+
+
+def is_vacuum_like(device: CloudDevice) -> bool:
+    blob = " ".join(
+        [
+            device.name,
+            device.product_name,
+            device.product_id,
+            device.category,
+        ]
+    ).lower()
+    if device.category.lower() in _VACUUM_CATEGORIES:
+        return True
+    return any(hint in blob for hint in _VACUUM_HINTS)
+
+
+def pick_vacuum(
+    devices: list[CloudDevice],
+    known_id: str | None = None,
+    known_uuid: str | None = None,
+) -> CloudDevice | None:
+    """Prefer known LAN id/uuid, then schlurp/D600/830P/sweeper — not exact name 830P."""
+    if known_id:
+        for device in devices:
+            if device.device_id == known_id and device.local_key:
+                return device
+    if known_uuid:
+        for device in devices:
+            if device.uuid == known_uuid and device.local_key:
+                return device
+    vacuums = [d for d in devices if d.local_key and is_vacuum_like(d)]
+    if not vacuums:
+        return None
+    for device in vacuums:
+        if "schlurp" in device.name.lower():
+            return device
+    for device in vacuums:
+        if "d600" in (device.name + " " + device.product_name).lower():
+            return device
+    return vacuums[0]
 
 
 class ProscenicOemApi:
@@ -125,22 +173,21 @@ class ProscenicOemApi:
 
     def list_devices(self) -> list[CloudDevice]:
         devices: list[CloudDevice] = []
-        for group in self._api("tuya.m.location.list"):
-            for raw in self._api(
+        groups = self._api("tuya.m.location.list") or []
+        for group in groups:
+            raw_list = self._api(
                 "tuya.m.my.group.device.list", extra_params={"gid": group["groupId"]}
-            ):
-                devices.append(map_cloud_device(raw))
+            ) or []
+            for raw in raw_list:
+                mapped = map_cloud_device(raw)
+                if mapped.device_id:
+                    devices.append(mapped)
         return devices
 
     def find_830p(
         self, device_id: str | None = None, uuid: str | None = None
     ) -> CloudDevice | None:
-        for device in self.list_devices():
-            if device_id and device.device_id == device_id:
-                return device
-            if uuid and device.uuid == uuid:
-                return device
-        return None
+        return pick_vacuum(self.list_devices(), known_id=device_id, known_uuid=uuid)
 
     def _api(
         self,
@@ -205,15 +252,11 @@ def discover_830p(
 
     api = ProscenicOemApi(email, password, region=region, http_post=http_post)
     api.login()
-    found = api.find_830p(
-        device_id=device_id or KNOWN_DEVICE_ID, uuid=uuid or KNOWN_UUID
+    found = pick_vacuum(
+        api.list_devices(),
+        known_id=device_id or KNOWN_DEVICE_ID,
+        known_uuid=uuid or KNOWN_UUID,
     )
-    if found is None:
-        found = api.find_830p()
-    if found is None:
-        devices = api.list_devices()
-        if len(devices) == 1:
-            found = devices[0]
     if found is None:
         raise ProscenicOemError("no Proscenic 830P on this account")
     host = ""
