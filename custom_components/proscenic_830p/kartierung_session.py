@@ -11,11 +11,17 @@ from .protocol import Fault, VacuumStatus, encode_direction
 GRID_CELLS = 80
 DOCK_MM = GRID_CELLS * MAPPING_RESOLUTION_MM / 2.0
 DEFAULT_UNDOCK_TICKS = 16
+LIVE_TURN_TICKS = 8
 
 
 class KartierungSession:
-    def __init__(self, undock_ticks: int = DEFAULT_UNDOCK_TICKS) -> None:
+    def __init__(
+        self,
+        undock_ticks: int = DEFAULT_UNDOCK_TICKS,
+        live_drive: bool = True,
+    ) -> None:
         self.undock_ticks = undock_ticks
+        self.live_drive = live_drive
         self.grid = OccupancyGrid(
             resolution_mm=MAPPING_RESOLUTION_MM,
             origin_x_mm=0.0,
@@ -32,6 +38,7 @@ class KartierungSession:
         self.reason = "idle"
         self._ticks = 0
         self._prev_bumper = False
+        self._turn_left = 0
 
     def start(self) -> None:
         self.grid = OccupancyGrid(
@@ -52,6 +59,7 @@ class KartierungSession:
         self.reason = "start"
         self._ticks = 0
         self._prev_bumper = False
+        self._turn_left = 0
 
     def stop(self) -> None:
         self.running = False
@@ -88,7 +96,9 @@ class KartierungSession:
         )
         self.grid.observe(sample)
         self.pose = sample
-        if undocking:
+        if self.live_drive:
+            move_dir = self._live_direction(hit, undocking)
+        elif undocking:
             move_dir = "forward"
             self.phase = "explore"
             self.reason = "undock"
@@ -108,3 +118,27 @@ class KartierungSession:
         if not changed:
             return None
         return encode_direction(move_dir)
+
+    def _live_direction(self, hit: bool, undocking: bool) -> str:
+        """Forward and left-turns only. Backward at the dock is the F/B rock."""
+        if undocking:
+            self.phase = "explore"
+            self.reason = "undock"
+            return "forward"
+        if self._turn_left > 0:
+            self._turn_left -= 1
+            if self._turn_left == 0:
+                self.phase = "explore"
+                self.reason = "drive"
+                return "forward"
+            self.phase = "explore"
+            self.reason = "turn"
+            return "turnleft"
+        if hit:
+            self._turn_left = LIVE_TURN_TICKS
+            self.phase = "explore"
+            self.reason = "turn"
+            return "turnleft"
+        self.phase = "explore"
+        self.reason = "drive"
+        return "forward"

@@ -9,7 +9,7 @@ from .kartierung_session import KartierungSession
 
 __all__ = ["DOMAIN"]
 
-PLATFORMS = ["vacuum"]
+PLATFORMS = ["vacuum", "button"]
 
 
 async def async_setup(hass, config):

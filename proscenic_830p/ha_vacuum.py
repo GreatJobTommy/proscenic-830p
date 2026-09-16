@@ -16,7 +16,7 @@ from .kartierung_session import KartierungSession
 from .map_image import render_occupancy_png
 from .constants import FIRMWARE_MAIN, FIRMWARE_MCU, WIFI_BAND_GHZ
 from .controller import VacuumController
-from .protocol import FanSpeed, Fault, WorkState, decode_status, ha_state
+from .protocol import FanSpeed, Fault, decode_status, ha_state
 
 SendDps = Callable[[Mapping[str, object]], object]
 
@@ -100,6 +100,17 @@ class Proscenic830PVacuum(StateVacuumEntity):
     @property
     def unique_id(self) -> str | None:
         return self._attr_unique_id
+
+    @property
+    def device_info(self) -> dict[str, object] | None:
+        if not self._attr_unique_id:
+            return None
+        return {
+            "identifiers": {("proscenic_830p", self._attr_unique_id)},
+            "name": self._attr_name,
+            "manufacturer": "Proscenic",
+            "model": "830P",
+        }
 
     @property
     def available(self) -> bool:
@@ -277,40 +288,7 @@ class Proscenic830PVacuum(StateVacuumEntity):
             return
         self._session.start()
         await self.hass.async_add_executor_job(self._write_map_png)
-        if await self._firmware_undock():
-            self._session.undock_ticks = 0
         self._kartierung_task = self.hass.async_create_task(self._run_kartierung())
-
-    async def _firmware_undock(self) -> bool:
-        """Leave the charger with DP 25=smart, then freeze so DP 26 can take over."""
-        try:
-            await asyncio.wait_for(
-                self.hass.async_add_executor_job(self._controller.start),
-                timeout=2.5,
-            )
-        except Exception:
-            return False
-        for _ in range(16):
-            await asyncio.sleep(0.5)
-            try:
-                status = await asyncio.wait_for(
-                    self.hass.async_add_executor_job(self._controller.refresh),
-                    timeout=2.0,
-                )
-            except Exception:
-                continue
-            if status is None or status.work_state is None:
-                continue
-            if status.work_state not in (WorkState.CHARGING, WorkState.GOING_CHARGING):
-                break
-        try:
-            await asyncio.wait_for(
-                self.hass.async_add_executor_job(self._controller.direction, "stop"),
-                timeout=2.5,
-            )
-        except Exception:
-            pass
-        return True
 
     async def async_stop_kartierung(self) -> None:
         if self._session is not None:

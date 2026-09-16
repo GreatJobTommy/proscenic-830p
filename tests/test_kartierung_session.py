@@ -55,7 +55,7 @@ def test_undock_ignores_dock_bumper() -> None:
 
 
 def test_bumper_hit_backs_off_and_stamps_occupied() -> None:
-    session = KartierungSession(undock_ticks=0)
+    session = KartierungSession(undock_ticks=0, live_drive=False)
     session.start()
     session.tick(_status(hit=False), dt_s=0.2)
     dps = session.tick(_status(hit=True), dt_s=0.2)
@@ -65,13 +65,25 @@ def test_bumper_hit_backs_off_and_stamps_occupied() -> None:
 
 
 def test_sticky_bumper_does_not_retrigger_while_backing() -> None:
-    session = KartierungSession(undock_ticks=0)
+    session = KartierungSession(undock_ticks=0, live_drive=False)
     session.start()
     session.tick(_status(hit=False), dt_s=0.2)
     session.tick(_status(hit=True), dt_s=0.2)
     dps = session.tick(_status(hit=True), dt_s=0.2)
     assert dps is None
     assert session.phase == "backoff"
+
+
+def test_live_drive_never_sends_backward() -> None:
+    session = KartierungSession(undock_ticks=0, live_drive=True)
+    session.start()
+    assert session.tick(_status(hit=False), dt_s=0.2) == {"26": "forward"}
+    dps = session.tick(_status(hit=True), dt_s=0.2)
+    assert dps == {"26": "turnleft"}
+    assert session.tick(_status(hit=True), dt_s=0.2) is None
+    sent = {session.last_direction}
+    assert "backward" not in sent
+    assert session.grid.report().occupied > 0
 
 
 def test_stop_halts_session() -> None:
