@@ -8,7 +8,7 @@ from .occupancy import OccupancyGrid, PoseSample
 from .probe import bumper_hit, integrate_pose
 from .protocol import Fault, VacuumStatus, encode_direction
 
-GRID_CELLS = 120
+GRID_CELLS = 80
 DOCK_MM = GRID_CELLS * MAPPING_RESOLUTION_MM / 2.0
 
 

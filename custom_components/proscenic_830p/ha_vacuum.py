@@ -7,10 +7,13 @@ directly. When HA is present, async_setup_platform wires tinytuya LAN I/O.
 from __future__ import annotations
 
 import asyncio
+import time
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .adapter import TuyaLanAdapter
 from .kartierung_session import KartierungSession
+from .map_image import render_occupancy_png
 from .constants import FIRMWARE_MAIN, FIRMWARE_MCU, WIFI_BAND_GHZ
 from .controller import VacuumController
 from .protocol import FanSpeed, Fault, decode_status, ha_state
@@ -83,6 +86,7 @@ class Proscenic830PVacuum(StateVacuumEntity):
         self._available = True
         self._session = session
         self._kartierung_task: asyncio.Task | None = None
+        self._map_rev = 0
 
     @property
     def name(self) -> str:
@@ -192,6 +196,12 @@ class Proscenic830PVacuum(StateVacuumEntity):
         return self._status.fan.value
 
     @property
+    def entity_picture(self) -> str | None:
+        if not self._map_rev:
+            return None
+        return f"/local/proscenic_830p_karte.png?v={self._map_rev}"
+
+    @property
     def extra_state_attributes(self) -> dict[str, object]:
         attrs: dict[str, object] = {
             "firmware_main": FIRMWARE_MAIN,
@@ -199,8 +209,12 @@ class Proscenic830PVacuum(StateVacuumEntity):
             "wifi_ghz": WIFI_BAND_GHZ,
         }
         if self._session is not None:
+            report = self._session.grid.report()
             attrs["kartierung"] = self._session.running
             attrs["kartierung_phase"] = self._session.phase
+            attrs["kartierung_reason"] = self._session.reason
+            attrs["occupied"] = report.occupied
+            attrs["free"] = report.free
         if self._status is None:
             return attrs
         attrs["mop_equipped"] = self._status.mop_equipped
@@ -257,6 +271,7 @@ class Proscenic830PVacuum(StateVacuumEntity):
         if self._kartierung_task is not None and not self._kartierung_task.done():
             return
         self._session.start()
+        await self.hass.async_add_executor_job(self._write_map_png)
         self._kartierung_task = self.hass.async_create_task(self._run_kartierung())
 
     async def async_stop_kartierung(self) -> None:
@@ -274,10 +289,21 @@ class Proscenic830PVacuum(StateVacuumEntity):
         if hasattr(self, "async_write_ha_state"):
             self.async_write_ha_state()
 
+    def _write_map_png(self) -> None:
+        if self._session is None or self.hass is None:
+            return
+        png = render_occupancy_png(
+            self._session.grid, pose=self._session.pose, cell_px=4
+        )
+        path = Path(self.hass.config.path("www", "proscenic_830p_karte.png"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png)
+        self._map_rev = int(time.time() * 1000)
+
     async def _run_kartierung(self) -> None:
         assert self._session is not None
         try:
-            for _ in range(720):
+            for step in range(720):
                 if not self._session.running:
                     break
                 try:
@@ -288,6 +314,8 @@ class Proscenic830PVacuum(StateVacuumEntity):
                 await self.hass.async_add_executor_job(
                     self._controller.direction, dps["26"]
                 )
+                if step % 8 == 0:
+                    await self.hass.async_add_executor_job(self._write_map_png)
                 self.async_write_ha_state()
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
@@ -296,6 +324,10 @@ class Proscenic830PVacuum(StateVacuumEntity):
             self._session.stop()
             try:
                 self._controller.direction("stop")
+            except Exception:
+                pass
+            try:
+                await self.hass.async_add_executor_job(self._write_map_png)
             except Exception:
                 pass
             self.async_write_ha_state()

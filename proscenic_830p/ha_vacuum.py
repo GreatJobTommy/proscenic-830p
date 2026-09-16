@@ -7,10 +7,13 @@ directly. When HA is present, async_setup_platform wires tinytuya LAN I/O.
 from __future__ import annotations
 
 import asyncio
+import time
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .adapter import TuyaLanAdapter
 from .kartierung_session import KartierungSession
+from .map_image import render_occupancy_png
 from .constants import FIRMWARE_MAIN, FIRMWARE_MCU, WIFI_BAND_GHZ
 from .controller import VacuumController
 from .protocol import FanSpeed, Fault, decode_status, ha_state
@@ -83,6 +86,7 @@ class Proscenic830PVacuum(StateVacuumEntity):
         self._available = True
         self._session = session
         self._kartierung_task: asyncio.Task | None = None
+        self._map_rev = 0
 
     @property
     def name(self) -> str:
@@ -192,6 +196,12 @@ class Proscenic830PVacuum(StateVacuumEntity):
         return self._status.fan.value
 
     @property
+    def entity_picture(self) -> str | None:
+        if not self._map_rev:
+            return None
+        return f"/local/proscenic_830p_karte.png?v={self._map_rev}"
+
+    @property
     def extra_state_attributes(self) -> dict[str, object]:
         attrs: dict[str, object] = {
             "firmware_main": FIRMWARE_MAIN,
@@ -199,8 +209,12 @@ class Proscenic830PVacuum(StateVacuumEntity):
             "wifi_ghz": WIFI_BAND_GHZ,
         }
         if self._session is not None:
+            report = self._session.grid.report()
             attrs["kartierung"] = self._session.running
             attrs["kartierung_phase"] = self._session.phase
+            attrs["kartierung_reason"] = self._session.reason
+            attrs["occupied"] = report.occupied
+            attrs["free"] = report.free
         if self._status is None:
             return attrs
         attrs["mop_equipped"] = self._status.mop_equipped

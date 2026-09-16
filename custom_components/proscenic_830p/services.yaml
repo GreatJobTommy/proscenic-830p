@@ -40,7 +40,7 @@ remote_control:
 
 kartierung:
   name: Kartierung
-  description: Start dock-marked bumper mapping. Watch camera.schlurp_karte. Robot leaves the dock.
+  description: Start bumper occupancy mapping from the dock. No robot camera — the map is the vacuum picture.
   target:
     entity:
       domain: vacuum
