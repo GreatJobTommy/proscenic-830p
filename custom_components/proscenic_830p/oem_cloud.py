@@ -20,6 +20,14 @@ PROSCENIC_SECRET = (
 USER_AGENT = "TY-UA=APP/Android/1.1.6/SDK/null"
 API_VERSION = "1.0"
 DEFAULT_REGION = "eu"
+_DEVICE_LIST_ACTIONS = (
+    "tuya.m.my.group.device.list",
+    "m.life.my.group.device.list",
+)
+_HOME_LIST_ACTIONS = (
+    "tuya.m.location.list",
+    "m.life.home.list",
+)
 
 HttpPost = Callable[..., Any]
 
@@ -72,7 +80,51 @@ def _plain_rsa_encrypt(modulus: int, exponent: int, message: bytes) -> bytes:
 
 def encrypt_password(modulus_str: str, exponent_str: str, password: str) -> str:
     passwd_hash = hashlib.md5(password.encode("utf-8")).hexdigest().encode("utf-8")
-    return _plain_rsa_encrypt(int(modulus_str), int(exponent_str), passwd_hash).hex()
+    return _plain_rsa_encrypt(
+        _parse_int(modulus_str), _parse_int(exponent_str), passwd_hash
+    ).hex()
+
+
+def _parse_int(value: str) -> int:
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        return int(text, 16)
+
+
+def as_list(result: Any) -> list[Any]:
+    """Unwrap OEM list payloads (bare list or {devices|list|groupList|...})."""
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        for key in (
+            "devices",
+            "deviceList",
+            "list",
+            "groupList",
+            "groups",
+            "homes",
+            "data",
+            "infos",
+        ):
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+        if any(k in result for k in ("devId", "id", "gwId", "groupId")):
+            return [result]
+    return []
+
+
+def group_id_of(group: Any) -> str:
+    if not isinstance(group, dict):
+        return str(group)
+    for key in ("groupId", "gid", "id", "homeId", "ownerId"):
+        if group.get(key) not in (None, ""):
+            return str(group[key])
+    return ""
 
 
 _VACUUM_CATEGORIES = {"sd"}
@@ -149,15 +201,29 @@ class ProscenicOemApi:
         self._sid: str | None = None
 
     def login(self) -> str:
+        last_error: Exception | None = None
+        for country in ("", "49", "43", "41", "44", "1", "86"):
+            try:
+                self._sid = self._login_email(country)
+                return self._sid
+            except InvalidAuthentication:
+                raise
+            except ProscenicOemError as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
+        raise ProscenicOemError("login failed")
+
+    def _login_email(self, country_code: str) -> str:
         token_info = self._api(
             "tuya.m.user.email.token.create",
-            {"countryCode": "", "email": self._username},
+            {"countryCode": country_code, "email": self._username},
             requires_sid=False,
         )
         login_info = self._api(
             "tuya.m.user.email.password.login",
             {
-                "countryCode": "",
+                "countryCode": country_code,
                 "email": self._username,
                 "ifencrypt": 1,
                 "options": '{"group": 1}',
@@ -168,19 +234,32 @@ class ProscenicOemApi:
             },
             requires_sid=False,
         )
-        self._sid = login_info["sid"]
-        return self._sid
+        return str(login_info["sid"])
 
     def list_devices(self) -> list[CloudDevice]:
         devices: list[CloudDevice] = []
-        groups = self._api("tuya.m.location.list") or []
-        for group in groups:
-            raw_list = self._api(
-                "tuya.m.my.group.device.list", extra_params={"gid": group["groupId"]}
-            ) or []
+        seen: set[str] = set()
+        groups = []
+        for action in _HOME_LIST_ACTIONS:
+            groups = as_list(self._api_try(action))
+            if groups:
+                break
+        gids = [gid for gid in (group_id_of(g) for g in groups) if gid]
+        if not gids:
+            gids = [""]
+        for gid in gids:
+            extra = {"gid": gid} if gid else None
+            raw_list: list[Any] = []
+            for action in _DEVICE_LIST_ACTIONS:
+                raw_list = as_list(self._api_try(action, extra_params=extra))
+                if raw_list:
+                    break
             for raw in raw_list:
+                if not isinstance(raw, dict):
+                    continue
                 mapped = map_cloud_device(raw)
-                if mapped.device_id:
+                if mapped.device_id and mapped.device_id not in seen:
+                    seen.add(mapped.device_id)
                     devices.append(mapped)
         return devices
 
@@ -222,6 +301,23 @@ class ProscenicOemApi:
             raise ProscenicOemError(f"{msg} ({code})")
         return body.get("result")
 
+    def _api_try(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        extra_params: dict[str, str] | None = None,
+        requires_sid: bool = True,
+    ) -> Any:
+        try:
+            return self._api(
+                action,
+                payload=payload,
+                extra_params=extra_params,
+                requires_sid=requires_sid,
+            )
+        except ProscenicOemError:
+            return None
+
     def _post(self, params: dict[str, str], data: dict[str, str]) -> dict[str, Any]:
         if self._http_post is not None:
             return self._http_post(self._endpoint, params=params, data=data)
@@ -252,13 +348,17 @@ def discover_830p(
 
     api = ProscenicOemApi(email, password, region=region, http_post=http_post)
     api.login()
+    devices = api.list_devices()
     found = pick_vacuum(
-        api.list_devices(),
+        devices,
         known_id=device_id or KNOWN_DEVICE_ID,
         known_uuid=uuid or KNOWN_UUID,
     )
     if found is None:
-        raise ProscenicOemError("no Proscenic 830P on this account")
+        names = ", ".join(
+            (d.name or d.product_name or d.device_id or "?") for d in devices
+        ) or "none"
+        raise ProscenicOemError(f"no Proscenic 830P on this account (saw: {names})")
     host = ""
     if hosts_by_gwid:
         host = hosts_by_gwid.get(found.device_id, "")

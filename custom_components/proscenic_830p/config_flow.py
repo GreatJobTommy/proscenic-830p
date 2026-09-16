@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -18,6 +19,7 @@ from .oem_cloud import InvalidAuthentication, ProscenicOemError, discover_830p
 CONF_DEVICE_ID = "device_id"
 CONF_REGION = "region"
 CONF_NAME = "name"
+_LOGGER = logging.getLogger(__name__)
 
 
 async def _lan_host(hass: HomeAssistant, device_id: str) -> str:
@@ -61,8 +63,12 @@ class Proscenic830PConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             except InvalidAuthentication:
                 errors["base"] = "invalid_auth"
-            except ProscenicOemError:
-                errors["base"] = "no_device"
+            except ProscenicOemError as err:
+                _LOGGER.warning("ProscenicHome discover failed: %s", err)
+                if "no Proscenic 830P" in str(err):
+                    errors["base"] = "no_device"
+                else:
+                    errors["base"] = "cannot_connect"
             else:
                 host = discovered.get("host") or await _lan_host(
                     self.hass, discovered["device_id"]

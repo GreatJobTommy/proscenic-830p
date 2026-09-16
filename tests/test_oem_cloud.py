@@ -3,6 +3,7 @@ from proscenic_830p.constants import KNOWN_DEVICE_ID, KNOWN_MAC, KNOWN_UUID
 from proscenic_830p.oem_cloud import (
     InvalidAuthentication,
     ProscenicOemApi,
+    as_list,
     discover_830p,
     map_cloud_device,
     sign_request,
@@ -218,6 +219,42 @@ def test_discover_prefers_known_id_over_other_names() -> None:
     )
     assert cfg["device_id"] == KNOWN_DEVICE_ID
     assert cfg["local_key"] == "knownlocalkey830p"
+
+
+def test_as_list_unwraps_nested_group_and_device_payloads() -> None:
+    assert as_list([{"groupId": "g1"}])[0]["groupId"] == "g1"
+    assert as_list({"groupList": [{"id": "g1"}]})[0]["id"] == "g1"
+    assert as_list({"devices": [SCHLURP_D600]})[0]["name"] == "schlurp"
+    assert as_list({"list": [SCHLURP_D600]})[0]["devId"] == SCHLURP_D600["devId"]
+    assert as_list(None) == []
+
+
+def test_discover_nested_home_and_life_device_list() -> None:
+    def http_post(url, params=None, data=None):
+        action = params["a"]
+        if action == "tuya.m.user.email.token.create":
+            return {
+                "success": True,
+                "result": {"publicKey": "65537", "exponent": "65537", "token": "tok"},
+            }
+        if action == "tuya.m.user.email.password.login":
+            return {"success": True, "result": {"sid": "sid-1"}}
+        if action == "tuya.m.location.list":
+            return {"success": True, "result": {"groupList": [{"id": "home-1"}]}}
+        if action == "tuya.m.my.group.device.list":
+            return {
+                "success": False,
+                "errorCode": "PERMISSION_DENIED",
+                "errorMsg": "nope",
+            }
+        if action == "m.life.my.group.device.list":
+            assert params.get("gid") == "home-1"
+            return {"success": True, "result": {"devices": [SCHLURP_D600]}}
+        raise AssertionError(action)
+
+    cfg = discover_830p("user@example.com", "pw", http_post=http_post)
+    assert cfg["local_key"] == "schlurplocalkey99"
+    assert cfg["name"] == "schlurp"
 
 
 def test_ha_maps_no_device_only_when_matcher_finds_nothing() -> None:

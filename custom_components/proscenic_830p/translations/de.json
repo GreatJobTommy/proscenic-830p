@@ -29,7 +29,8 @@
     },
     "error": {
       "invalid_auth": "ProscenicHome E-Mail/Passwort abgelehnt",
-      "no_device": "Kein 830P auf diesem ProscenicHome-Konto"
+      "no_device": "Kein 830P auf diesem ProscenicHome-Konto",
+      "cannot_connect": "ProscenicHome-API-Fehler — Details in den HA-Logs"
     },
     "abort": {
       "already_configured": "Dieser 830P ist bereits eingerichtet"
