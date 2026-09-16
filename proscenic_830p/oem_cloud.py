@@ -90,6 +90,18 @@ _MFA_CODES = {
     "USER_NEED_MFA",
 }
 
+_INVALID_AUTH_CODES = {
+    "USER_PASSWD_WRONG",
+    "USER_NOT_EXISTS",
+    "USER_IS_NOT_EXISTS",
+    "USER_CODE_WRONG",
+    "USER_VERIFY_CODE_ERROR",
+    "USER_VERIFY_CODE_WRONG",
+    "CODE_INVALID",
+    "EXPIRE_CODE",
+    "USER_CODE_EXPIRE",
+}
+
 
 def _mobile_hash(data: str) -> str:
     prehash = hashlib.md5(data.encode("utf-8")).hexdigest()
@@ -332,12 +344,14 @@ class ProscenicOemApi:
             return self._username
         return normalize_mobile(self._username, self._country_code)
 
-    def login(self, mfa_code: str = "") -> str:
-        # ProscenicHome 4.x (ThingClips) issues a different RSA token than the
-        # legacy tuya.m.user.email.token.create path. Encrypting with the
-        # wrong token comes back as USER_PASSWD_WRONG even when the password
-        # is correct. Only fall back to the old API when the new token action
-        # does not exist — never after a wrong-password response.
+    def login(self, mfa_code: str = "", email_code: str = "") -> str:
+        # Password login against this OEM client_id keeps returning
+        # USER_PASSWD_WRONG for a live ProscenicHome 4.1 account. Email OTP
+        # (type=1) succeeds without a password and does not increment the
+        # Tuya lockout counter.
+        if email_code:
+            self._sid = self._login_email_code(email_code)
+            return self._sid
         try:
             self._sid = self._login_thing(mfa_code)
         except UnsupportedApi:
@@ -350,6 +364,74 @@ class ProscenicOemApi:
                     pass
             raise
         return self._sid
+
+    def send_login_code(self) -> None:
+        if looks_like_email(self._username):
+            payload = {
+                "email": self._username,
+                "countryCode": self._country_code,
+                "type": 1,
+            }
+            try:
+                self._api(
+                    "thing.m.user.email.code.send",
+                    payload,
+                    requires_sid=False,
+                )
+            except UnsupportedApi:
+                self._api(
+                    "tuya.m.user.email.code.send",
+                    payload,
+                    requires_sid=False,
+                )
+            return
+        payload = {
+            "mobile": self._account_username(),
+            "countryCode": self._country_code,
+            "type": 1,
+        }
+        try:
+            self._api(
+                "thing.m.user.mobile.code.send",
+                payload,
+                requires_sid=False,
+            )
+        except UnsupportedApi:
+            self._api(
+                "tuya.m.user.mobile.code.send",
+                payload,
+                requires_sid=False,
+            )
+
+    def _login_email_code(self, code: str) -> str:
+        if looks_like_email(self._username):
+            payload = {
+                "email": self._username,
+                "code": code,
+                "countryCode": self._country_code,
+            }
+            actions = (
+                "thing.m.user.email.code.login",
+                "tuya.m.user.email.code.login",
+            )
+        else:
+            payload = {
+                "mobile": self._account_username(),
+                "code": code,
+                "countryCode": self._country_code,
+            }
+            actions = (
+                "thing.m.user.mobile.code.login",
+                "tuya.m.user.mobile.code.login",
+            )
+        last_err: Exception | None = None
+        for action in actions:
+            try:
+                login_info = self._api(action, payload, requires_sid=False)
+                return str(login_info["sid"])
+            except UnsupportedApi as err:
+                last_err = err
+        raise ProscenicOemError(f"email/phone code login missing: {last_err}")
 
     def _login_thing(self, mfa_code: str = "") -> str:
         token_info = self._api(
@@ -534,8 +616,8 @@ class ProscenicOemApi:
             msg = body.get("errorMsg") or code or "oem api error"
             if str(code) in _MFA_CODES:
                 raise MfaRequired(f"{msg} ({code})")
-            if code == "USER_PASSWD_WRONG":
-                raise InvalidAuthentication(str(msg))
+            if str(code) in _INVALID_AUTH_CODES:
+                raise InvalidAuthentication(f"{msg} ({action} v{version} {code})")
             if str(code).startswith(_PASSWORD_LOCK_PREFIX):
                 raise PasswordLocked(f"{msg} ({code})")
             if str(code) in _RATE_LIMIT_CODES:
@@ -598,6 +680,7 @@ def discover_830p(
     hosts_by_gwid: Mapping[str, str] | None = None,
     country_code: str = "49",
     mfa_code: str = "",
+    email_code: str = "",
 ) -> dict[str, str]:
     """Login to ProscenicHome, return LAN config (password is not returned)."""
     from .constants import KNOWN_DEVICE_ID, KNOWN_UUID  # noqa: PLC0415
@@ -609,7 +692,7 @@ def discover_830p(
         http_post=http_post,
         country_code=country_code,
     )
-    api.login(mfa_code=mfa_code)
+    api.login(mfa_code=mfa_code, email_code=email_code)
     devices = api.list_devices()
     found = pick_vacuum(
         devices,
@@ -631,3 +714,20 @@ def discover_830p(
         "uuid": found.uuid,
         "name": found.name,
     }
+
+
+def request_login_code(
+    email: str,
+    country_code: str = "49",
+    region: str = DEFAULT_REGION,
+    http_post: HttpPost | None = None,
+) -> None:
+    """Send a 6-digit ProscenicHome login code. Does not consume the password lockout."""
+    api = ProscenicOemApi(
+        email,
+        "",
+        region=region,
+        http_post=http_post,
+        country_code=country_code,
+    )
+    api.send_login_code()

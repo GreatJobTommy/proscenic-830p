@@ -10,19 +10,18 @@
       },
       "login": {
         "title": "ProscenicHome",
-        "description": "ProscenicHome email or phone plus the app password (not an Apple ID). Germany = country code 49. After a lockout wait 5 minutes and try once.",
+        "description": "Email or phone from the Proscenic app. A 6-digit login code is sent; the app password is not used. Germany = country code 49.",
         "data": {
           "username": "Email or phone",
-          "password": "Password",
           "country_code": "Country code",
           "region": "Tuya region"
         }
       },
-      "mfa": {
+      "otp": {
         "title": "ProscenicHome code",
-        "description": "A 6-digit code was sent to the ProscenicHome email. Enter it once.",
+        "description": "Enter the 6-digit code from the ProscenicHome email (or SMS). Use the newest code.",
         "data": {
-          "mfa_code": "Code"
+          "otp_code": "Code"
         }
       },
       "manual": {
@@ -36,7 +35,7 @@
       }
     },
     "error": {
-      "invalid_auth": "ProscenicHome email/password rejected",
+      "invalid_auth": "ProscenicHome email or code rejected",
       "no_device": "No 830P on this ProscenicHome account",
       "cannot_connect": "ProscenicHome API error — check HA logs",
       "too_frequent": "ProscenicHome rate limit — wait a minute, then try again",

@@ -10,6 +10,7 @@ from proscenic_830p.oem_cloud import (
     discover_830p,
     encrypt_password_pkcs1,
     map_cloud_device,
+    request_login_code,
     sign_request,
 )
 
@@ -533,3 +534,64 @@ def test_ha_maps_password_lockout_string() -> None:
     ).read_text(encoding="utf-8")
     assert "password_locked" in de
     assert "5 Minuten" in de
+
+
+def test_send_login_code_uses_thing_email_code_send() -> None:
+    import json
+
+    seen: list[tuple[str, dict]] = []
+
+    def http_post(url, params=None, data=None):
+        action = params["a"]
+        payload = json.loads(data["postData"]) if data and data.get("postData") else {}
+        seen.append((action, payload))
+        if action == "thing.m.user.email.code.send":
+            assert payload.get("email") == "tommyra@gmx.de"
+            assert payload.get("countryCode") == "49"
+            assert payload.get("type") == 1
+            return {"success": True, "result": True}
+        raise AssertionError(action)
+
+    request_login_code("tommyra@gmx.de", country_code="49", http_post=http_post)
+    assert seen[0][0] == "thing.m.user.email.code.send"
+    assert not any("password" in action for action, _ in seen)
+
+
+def test_discover_with_email_code_skips_password_login() -> None:
+    actions: list[str] = []
+
+    def http_post(url, params=None, data=None):
+        action = params["a"]
+        actions.append(action)
+        if action == "thing.m.user.email.code.login":
+            return {"success": True, "result": {"sid": "sid-otp"}}
+        if action == "tuya.m.location.list":
+            return {"success": True, "result": [{"groupId": "g1"}]}
+        if action == "tuya.m.my.group.device.list":
+            return {"success": True, "result": [SCHLURP_D600]}
+        raise AssertionError(action)
+
+    cfg = discover_830p(
+        "user@example.com",
+        "",
+        http_post=http_post,
+        email_code="123456",
+    )
+    assert cfg["local_key"] == "schlurplocalkey99"
+    assert "thing.m.user.email.code.login" in actions
+    assert "thing.m.user.email.password.login" not in actions
+    assert "tuya.m.user.email.password.login" not in actions
+
+
+def test_ha_otp_copy_is_german() -> None:
+    from pathlib import Path
+
+    de = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "proscenic_830p"
+        / "translations"
+        / "de.json"
+    ).read_text(encoding="utf-8")
+    assert "6-stelligen Code" in de
+    assert '"otp"' in de
