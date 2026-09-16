@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Proscenic 830P",
+        "description": "Lokales Tuya-LAN (Port 6668). Der ProscenicHome-Login holt den local_key einmalig; das Passwort wird nicht gespeichert.",
+        "data": {
+          "mode": "Einrichtung"
+        }
+      },
+      "login": {
+        "title": "ProscenicHome",
+        "description": "Dieselbe E-Mail/Passwort wie in der ProscenicHome-App (EU für Europe/Berlin).",
+        "data": {
+          "username": "E-Mail",
+          "password": "Passwort",
+          "region": "Tuya-Region"
+        }
+      },
+      "manual": {
+        "title": "local_key manuell",
+        "data": {
+          "host": "IP-Adresse",
+          "device_id": "Geräte-ID",
+          "local_key": "local_key",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "ProscenicHome E-Mail/Passwort abgelehnt",
+      "no_device": "Kein 830P auf diesem ProscenicHome-Konto"
+    },
+    "abort": {
+      "already_configured": "Dieser 830P ist bereits eingerichtet"
+    }
+  }
+}

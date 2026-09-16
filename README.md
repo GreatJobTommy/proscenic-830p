@@ -4,6 +4,19 @@ Local (LAN) control and a persistent occupancy map for the **Proscenic 830P** ro
 
 Firmware on the unit this was built for: **Main 1.0.3**, **MCU 1.4.3**.
 
+This 830P on the LAN:
+
+| Field | Value |
+| --- | --- |
+| Device ID | `bf4d77d05964608b34enbm` |
+| UUID | `936b5c32ba35da61` |
+| SN | `SSAM17UYE023DC` |
+| MAC | `68:57:2d:87:87:e9` |
+| LAN IP | `192.168.178.63` (Tuya 3.3 / TCP 6668) |
+| Product key | `ofqlgafdltzahwlh` |
+
+The “Wi-Fi IP” shown in ProscenicHome is often the **WAN** address, not the LAN address. Use the Fritz/DHCP IPv4 (here `.63`).
+
 ## 830P vs 790T protocol
 
 The 830P is an **8xx Tuya** robot. Local control is **Tuya protocol 3.3 on TCP port 6668** (same family as the 820T / 850T). `@gibranZawahra` confirmed the 830 on [edenhaus/ha-prosenic](https://github.com/edenhaus/ha-prosenic).
@@ -66,12 +79,16 @@ ln -s /config/proscenic-830p/custom_components/proscenic_830p /config/custom_com
 
 Home Assistant Core / Container: `pip install git+https://github.com/GreatJobTommy/proscenic-830p.git` and copy or symlink `custom_components/proscenic_830p` into `<config>/custom_components/`. Restart HA.
 
+**Preferred:** Settings → Devices → Add integration → **Proscenic 830P**. Choose *ProscenicHome login* (same email/password as the app). The flow fetches `local_key` once and then talks LAN only; the password is not stored.
+
+YAML still works if you already have the key:
+
 ```yaml
 # configuration.yaml
 vacuum:
   - platform: proscenic_830p
-    host: 192.168.1.50
-    device_id: YOUR_DEVICE_ID
+    host: 192.168.178.63
+    device_id: bf4d77d05964608b34enbm
     local_key: YOUR_LOCAL_KEY
     name: Saugroboter
 ```
