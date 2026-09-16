@@ -99,7 +99,15 @@ python -m proscenic_830p.launch_map tests/fixtures/occupancy_trace.json
 
 Prints every `OCCUPIED_CELL`, free/unknown counts, and an ASCII grid (`#` occupied, `.` free, `?` unknown). Re-running the same fixture is deterministic.
 
-Python API:
+Live scan/probe on the robot (no pose DP on Tuya 6668) dead-reckons from `DP 26` and treats fault bit 64 (bumper) / 32 (cliff) as contacts:
+
+```python
+from proscenic_830p.probe import probe_tick
+new_pose, command = probe_tick(grid, pose, status, dt_s=0.2)
+adapter.send_dps(command)  # {"26": "forward"} or {"26": "turnleft"}
+```
+
+Python API for a recorded trace:
 
 ```python
 from proscenic_830p.occupancy import PoseSample, scan_probe
