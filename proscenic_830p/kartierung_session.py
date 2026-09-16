@@ -68,9 +68,11 @@ class KartierungSession:
             return True
         return raw_hit and not self._prev_bumper
 
-    def tick(self, status: VacuumStatus | None, dt_s: float = 0.25) -> dict[str, str]:
+    def tick(self, status: VacuumStatus | None, dt_s: float = 0.25) -> dict[str, str] | None:
+        # DP 26 is a held overlay. Re-sending the same direction every tick
+        # makes the 830P pulse forward/backward in place.
         if not self.running:
-            return encode_direction("stop")
+            return None
         self._ticks += 1
         moved = integrate_pose(self.pose, self.last_direction, dt_s)
         raw_hit = bumper_hit(status) if status is not None else False
@@ -101,5 +103,8 @@ class KartierungSession:
             if move.direction == "stop":
                 self.running = False
         self._prev_bumper = raw_hit
+        changed = move_dir != self.last_direction
         self.last_direction = move_dir
+        if not changed:
+            return None
         return encode_direction(move_dir)
