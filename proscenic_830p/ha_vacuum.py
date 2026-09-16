@@ -6,9 +6,11 @@ directly. When HA is present, async_setup_platform wires tinytuya LAN I/O.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable, Mapping
 
 from .adapter import TuyaLanAdapter
+from .kartierung_session import KartierungSession
 from .constants import FIRMWARE_MAIN, FIRMWARE_MCU, WIFI_BAND_GHZ
 from .controller import VacuumController
 from .protocol import FanSpeed, Fault, decode_status, ha_state
@@ -71,6 +73,7 @@ class Proscenic830PVacuum(StateVacuumEntity):
         name: str,
         controller: VacuumController,
         unique_id: str | None = None,
+        session: KartierungSession | None = None,
     ) -> None:
         super().__init__()
         self._attr_name = name
@@ -78,6 +81,8 @@ class Proscenic830PVacuum(StateVacuumEntity):
         self._attr_unique_id = unique_id
         self._status = None
         self._available = True
+        self._session = session
+        self._kartierung_task: asyncio.Task | None = None
 
     @property
     def name(self) -> str:
@@ -193,6 +198,9 @@ class Proscenic830PVacuum(StateVacuumEntity):
             "firmware_mcu": FIRMWARE_MCU,
             "wifi_ghz": WIFI_BAND_GHZ,
         }
+        if self._session is not None:
+            attrs["kartierung"] = self._session.running
+            attrs["kartierung_phase"] = self._session.phase
         if self._status is None:
             return attrs
         attrs["mop_equipped"] = self._status.mop_equipped
@@ -243,17 +251,68 @@ class Proscenic830PVacuum(StateVacuumEntity):
     async def async_remote_control(self, direction: str) -> dict[str, object]:
         return self._controller.direction(direction)
 
+    async def async_start_kartierung(self) -> None:
+        if self._session is None or self.hass is None:
+            return
+        if self._kartierung_task is not None and not self._kartierung_task.done():
+            return
+        self._session.start()
+        self._kartierung_task = self.hass.async_create_task(self._run_kartierung())
+
+    async def async_stop_kartierung(self) -> None:
+        if self._session is not None:
+            self._session.stop()
+        task = self._kartierung_task
+        self._kartierung_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._controller.direction("stop")
+        if hasattr(self, "async_write_ha_state"):
+            self.async_write_ha_state()
+
+    async def _run_kartierung(self) -> None:
+        assert self._session is not None
+        try:
+            for _ in range(720):
+                if not self._session.running:
+                    break
+                try:
+                    status = await self.hass.async_add_executor_job(self._controller.refresh)
+                except Exception:
+                    status = None
+                dps = self._session.tick(status)
+                await self.hass.async_add_executor_job(
+                    self._controller.direction, dps["26"]
+                )
+                self.async_write_ha_state()
+                await asyncio.sleep(0.25)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._session.stop()
+            try:
+                self._controller.direction("stop")
+            except Exception:
+                pass
+            self.async_write_ha_state()
+
 
 def build_vacuum(
     name: str,
     send_dps: SendDps,
     status_fn: Callable[[], Mapping[object, object]] | None = None,
     unique_id: str | None = None,
+    session: KartierungSession | None = None,
 ) -> Proscenic830PVacuum:
     return Proscenic830PVacuum(
         name=name,
         controller=VacuumController(send_dps, status_fn=status_fn),
         unique_id=unique_id,
+        session=session,
     )
 
 
@@ -302,4 +361,8 @@ def _register_extra_services() -> None:
         "remote_control",
         {vol.Required("direction"): str},
         "async_remote_control",
+    )
+    platform.async_register_entity_service("kartierung", {}, "async_start_kartierung")
+    platform.async_register_entity_service(
+        "stop_kartierung", {}, "async_stop_kartierung"
     )

@@ -37,3 +37,17 @@ remote_control:
             - turnleft
             - turnright
             - stop
+
+kartierung:
+  name: Kartierung
+  description: Start dock-marked bumper mapping. Watch camera.schlurp_karte. Robot leaves the dock.
+  target:
+    entity:
+      domain: vacuum
+
+stop_kartierung:
+  name: Kartierung stoppen
+  description: Stop mapping and freeze the occupancy camera.
+  target:
+    entity:
+      domain: vacuum

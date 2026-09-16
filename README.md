@@ -114,6 +114,8 @@ Extra services: `wall_follow`, `single_room`, `mop`, `remote_control`.
 
 A dedicated mapping mode starts at the dock, drives a pose+bumper stream, and builds a **25 mm** occupancy grid (a 100 mm wooden post spans multiple cells on both axes). Occupied bumper hits stay occupied; unknown cells are never flood-filled into floor. After the first hit the drive policy backs off and **re-approaches from a second heading** (circumnavigate) instead of only turning left.
 
+In Home Assistant: put the 830P on the dock, open **schlurp Karte**, then call service `proscenic_830p.kartierung` on `vacuum.schlurp`. The robot leaves the dock on DP 26; the camera is the occupancy grid. Stop with `proscenic_830p.stop_kartierung`. Close the phone app while mapping.
+
 ```bash
 python -m proscenic_830p.launch_kartierung tests/fixtures/kartierung_post.json
 ```
