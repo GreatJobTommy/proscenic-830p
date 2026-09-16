@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from proscenic_830p.live import live_mapping_session
-from proscenic_830p.navigate import plan_coverage
+from proscenic_830p.navigate import body_clears_occupied, plan_coverage
 from proscenic_830p.occupancy import Cell
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "kartierung_post.json"
@@ -29,3 +29,5 @@ def test_coverage_path_stays_on_free_cells_only() -> None:
         assert pose.cell not in occupied
         assert pose.cell != unknown_cell
         assert grid.cell_index(*pose.cell) is Cell.FREE
+        # Body disk must not sit on occupied (rim contact only).
+        assert body_clears_occupied(grid, pose.x_mm, pose.y_mm)

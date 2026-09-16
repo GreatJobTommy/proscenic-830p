@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 
 from proscenic_830p.live import live_mapping_session
-from proscenic_830p.navigate import brush_touches_occupied, plan_edge_pass, side_brush_points
+from proscenic_830p.navigate import (
+    body_clears_occupied,
+    brush_touches_occupied,
+    plan_edge_pass,
+    side_brush_points,
+)
 from proscenic_830p.occupancy import Cell
 from proscenic_830p.protocol import Command, encode_command
 
@@ -31,6 +36,7 @@ def test_edge_pass_keeps_body_free_and_side_brush_on_occupied() -> None:
     touches = 0
     for pose in path:
         assert grid.cell_at(pose.x_mm, pose.y_mm) is Cell.FREE
+        assert body_clears_occupied(grid, pose.x_mm, pose.y_mm)
         left, right = side_brush_points(pose.x_mm, pose.y_mm, pose.heading_deg)
         hit_left = brush_touches_occupied(grid, left)
         hit_right = brush_touches_occupied(grid, right)

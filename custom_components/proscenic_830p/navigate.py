@@ -6,7 +6,7 @@ import math
 from collections import deque
 from dataclasses import dataclass
 
-from .constants import SIDE_BRUSH_OFFSET_DEG, SIDE_BRUSH_RADIUS_MM
+from .constants import BODY_RADIUS_MM, SIDE_BRUSH_OFFSET_DEG, SIDE_BRUSH_RADIUS_MM
 from .occupancy import Cell, OccupancyGrid
 
 _NEIGHBORS4 = ((1, 0), (-1, 0), (0, 1), (0, -1))
@@ -37,6 +37,43 @@ def side_brush_points(
         y_mm + SIDE_BRUSH_RADIUS_MM * math.sin(right_a),
     )
     return left, right
+
+
+def occupied_centers(grid: OccupancyGrid) -> tuple[tuple[float, float], ...]:
+    return tuple(grid.cell_center(i, j) for i, j in grid.report().occupied_cells)
+
+
+def min_occupied_distance_mm(
+    x_mm: float,
+    y_mm: float,
+    occupied_xy: tuple[tuple[float, float], ...],
+) -> float:
+    if not occupied_xy:
+        return float("inf")
+    return min(math.hypot(x_mm - ox, y_mm - oy) for ox, oy in occupied_xy)
+
+
+def body_clearance_mm(grid: OccupancyGrid) -> float:
+    """Occupied cell centres must stay outside the body interior (rim OK)."""
+    return BODY_RADIUS_MM - float(grid.resolution_mm)
+
+
+def body_clears_occupied(grid: OccupancyGrid, x_mm: float, y_mm: float) -> bool:
+    """True if no occupied cell centre is deep inside the 330 mm body disk."""
+    occ = occupied_centers(grid)
+    return min_occupied_distance_mm(x_mm, y_mm, occ) >= body_clearance_mm(grid)
+
+
+def cspace_free_cells(grid: OccupancyGrid) -> set[tuple[int, int]]:
+    """FREE cells that are valid body-centre poses (disk not on occupied)."""
+    occ = occupied_centers(grid)
+    clearance = body_clearance_mm(grid)
+    cells: set[tuple[int, int]] = set()
+    for i, j in grid.report().free_cells:
+        x_mm, y_mm = grid.cell_center(i, j)
+        if min_occupied_distance_mm(x_mm, y_mm, occ) >= clearance:
+            cells.add((i, j))
+    return cells
 
 
 def brush_touches_occupied(grid: OccupancyGrid, point: tuple[float, float]) -> bool:
@@ -106,20 +143,20 @@ def _poses_from_cells(
 
 
 def plan_coverage(grid: OccupancyGrid) -> tuple[PlannedPose, ...]:
-    """Boustrophedon coverage of reachable FREE cells only (never unknown/occupied)."""
-    free = set(grid.report().free_cells)
-    if not free:
+    """Boustrophedon coverage of reachable C-space cells (body disk off occupied)."""
+    walkable = cspace_free_cells(grid)
+    if not walkable:
         return ()
     start: tuple[int, int] | None = None
     if grid.dock_pose is not None:
         dock_cell = grid.world_to_cell(grid.dock_pose[0], grid.dock_pose[1])
-        if dock_cell in free:
+        if dock_cell in walkable:
             start = dock_cell
     if start is None:
-        start = min(free)
+        start = min(walkable)
 
     by_row: dict[int, list[int]] = {}
-    for i, j in free:
+    for i, j in walkable:
         by_row.setdefault(j, []).append(i)
     ordered: list[tuple[int, int]] = []
     for idx, j in enumerate(sorted(by_row)):
@@ -136,7 +173,7 @@ def plan_coverage(grid: OccupancyGrid) -> tuple[PlannedPose, ...]:
     for target in ordered:
         if target in visited:
             continue
-        segment = _bfs_free(path[-1], target, free)
+        segment = _bfs_free(path[-1], target, walkable)
         if not segment:
             continue
         for cell in segment[1:]:
@@ -145,87 +182,59 @@ def plan_coverage(grid: OccupancyGrid) -> tuple[PlannedPose, ...]:
     return _poses_from_cells(grid, path)
 
 
-def _frontier_free_cells(grid: OccupancyGrid) -> list[tuple[int, int]]:
-    free = set(grid.report().free_cells)
-    out: list[tuple[int, int]] = []
-    for i, j in free:
-        if any(
-            grid.cell_index(i + di, j + dj) is Cell.OCCUPIED for di, dj in _NEIGHBORS4
-        ):
-            out.append((i, j))
-    return out
-
-
-def _heading_for_brushes(grid: OccupancyGrid, i: int, j: int) -> float | None:
-    x_mm, y_mm = grid.cell_center(i, j)
-    for heading in range(0, 360, 5):
-        left, right = side_brush_points(x_mm, y_mm, float(heading))
+def _heading_brush_toward_occupied(
+    grid: OccupancyGrid,
+    x_mm: float,
+    y_mm: float,
+    occupied_xy: tuple[tuple[float, float], ...],
+) -> float | None:
+    if not occupied_xy:
+        return None
+    ox, oy = min(occupied_xy, key=lambda p: math.hypot(x_mm - p[0], y_mm - p[1]))
+    bearing = math.degrees(math.atan2(oy - y_mm, ox - x_mm))
+    for heading in (
+        bearing - SIDE_BRUSH_OFFSET_DEG,
+        bearing + SIDE_BRUSH_OFFSET_DEG,
+    ):
+        heading = heading % 360.0
+        left, right = side_brush_points(x_mm, y_mm, heading)
         if brush_touches_occupied(grid, left) or brush_touches_occupied(grid, right):
-            return float(heading)
+            return heading
     return None
 
 
 def plan_edge_pass(grid: OccupancyGrid) -> tuple[PlannedPose, ...]:
-    """Follow occupied frontier with body on free cells and a side brush on the Rand."""
-    free = set(grid.report().free_cells)
-    frontier = _frontier_free_cells(grid)
-    if not frontier:
+    """C-space poses ~body-radius from occupied, side brush on the Rand."""
+    occ_xy = occupied_centers(grid)
+    walkable = cspace_free_cells(grid)
+    if not occ_xy or not walkable:
         return ()
-    start = frontier[0]
-    if grid.dock_pose is not None:
-        dock_cell = grid.world_to_cell(grid.dock_pose[0], grid.dock_pose[1])
-        nearest = min(
-            frontier,
-            key=lambda c: abs(c[0] - dock_cell[0]) + abs(c[1] - dock_cell[1]),
-        )
-        start = nearest
-
-    remaining = set(frontier)
-    cells: list[tuple[int, int]] = []
-    cur = start
-    while remaining:
-        if cur in remaining:
-            remaining.remove(cur)
-            cells.append(cur)
-        nxt = None
-        best_len: int | None = None
-        for cand in remaining:
-            segment = _bfs_free(cur, cand, free)
-            if segment is None:
-                continue
-            if best_len is None or len(segment) < best_len:
-                best_len = len(segment)
-                nxt = cand
-        if nxt is None:
-            cur = min(remaining)
+    clearance = body_clearance_mm(grid)
+    reach = BODY_RADIUS_MM + 2 * float(grid.resolution_mm)
+    candidates: list[PlannedPose] = []
+    for i, j in walkable:
+        x_mm, y_mm = grid.cell_center(i, j)
+        dist = min_occupied_distance_mm(x_mm, y_mm, occ_xy)
+        if dist < clearance or dist > reach:
             continue
-        segment = _bfs_free(cur, nxt, free)
-        if segment:
-            for cell in segment[1:]:
-                if cell not in cells:
-                    cells.append(cell)
-                remaining.discard(cell)
-        cur = nxt
-
-    poses: list[PlannedPose] = []
-    for n, cell in enumerate(cells):
-        if grid.cell_index(*cell) is not Cell.FREE:
-            continue
-        heading = _heading_for_brushes(grid, *cell)
+        heading = _heading_brush_toward_occupied(grid, x_mm, y_mm, occ_xy)
         if heading is None:
-            if n + 1 < len(cells):
-                heading = _heading_along(grid, cell, cells[n + 1])
-            else:
-                heading = 0.0
-            x_mm, y_mm = grid.cell_center(*cell)
-            left, right = side_brush_points(x_mm, y_mm, heading)
-            if not (
-                brush_touches_occupied(grid, left)
-                or brush_touches_occupied(grid, right)
-            ):
-                continue
-        x_mm, y_mm = grid.cell_center(*cell)
-        poses.append(
-            PlannedPose(x_mm=x_mm, y_mm=y_mm, heading_deg=heading, cell=cell)
+            continue
+        left, right = side_brush_points(x_mm, y_mm, heading)
+        if not (
+            brush_touches_occupied(grid, left) or brush_touches_occupied(grid, right)
+        ):
+            continue
+        if not body_clears_occupied(grid, x_mm, y_mm):
+            continue
+        candidates.append(
+            PlannedPose(x_mm=x_mm, y_mm=y_mm, heading_deg=heading, cell=(i, j))
         )
-    return tuple(poses)
+    if not candidates:
+        return ()
+    cx = sum(p[0] for p in occ_xy) / len(occ_xy)
+    cy = sum(p[1] for p in occ_xy) / len(occ_xy)
+    candidates.sort(
+        key=lambda p: math.atan2(p.y_mm - cy, p.x_mm - cx)
+    )
+    return tuple(candidates)
