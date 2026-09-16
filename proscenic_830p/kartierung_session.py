@@ -10,10 +10,12 @@ from .protocol import Fault, VacuumStatus, encode_direction
 
 GRID_CELLS = 80
 DOCK_MM = GRID_CELLS * MAPPING_RESOLUTION_MM / 2.0
+DEFAULT_UNDOCK_TICKS = 16
 
 
 class KartierungSession:
-    def __init__(self) -> None:
+    def __init__(self, undock_ticks: int = DEFAULT_UNDOCK_TICKS) -> None:
+        self.undock_ticks = undock_ticks
         self.grid = OccupancyGrid(
             resolution_mm=MAPPING_RESOLUTION_MM,
             origin_x_mm=0.0,
@@ -28,6 +30,8 @@ class KartierungSession:
         self.running = False
         self.phase = "idle"
         self.reason = "idle"
+        self._ticks = 0
+        self._prev_bumper = False
 
     def start(self) -> None:
         self.grid = OccupancyGrid(
@@ -46,6 +50,8 @@ class KartierungSession:
         self.running = True
         self.phase = "explore"
         self.reason = "start"
+        self._ticks = 0
+        self._prev_bumper = False
 
     def stop(self) -> None:
         self.running = False
@@ -53,27 +59,47 @@ class KartierungSession:
         self.reason = "stop"
         self.last_direction = "stop"
 
+    def _policy_hit(self, raw_hit: bool) -> bool:
+        if self._ticks <= self.undock_ticks:
+            return False
+        if not raw_hit:
+            return False
+        if self.last_direction == "forward":
+            return True
+        return raw_hit and not self._prev_bumper
+
     def tick(self, status: VacuumStatus | None, dt_s: float = 0.25) -> dict[str, str]:
         if not self.running:
             return encode_direction("stop")
+        self._ticks += 1
         moved = integrate_pose(self.pose, self.last_direction, dt_s)
-        hit = bumper_hit(status) if status is not None else False
+        raw_hit = bumper_hit(status) if status is not None else False
         cliff = bool(status is not None and status.faults & Fault.OFF_GROUND)
+        undocking = self._ticks <= self.undock_ticks
+        hit = self._policy_hit(raw_hit)
         sample = PoseSample(
             x_mm=moved.x_mm,
             y_mm=moved.y_mm,
             heading_deg=moved.heading_deg,
             bumper=hit,
-            cliff=cliff,
+            cliff=False if undocking else cliff,
         )
         self.grid.observe(sample)
         self.pose = sample
-        move, self.policy = next_mapping_move(
-            sample, hit, self.grid, self.policy, dt_s=dt_s
-        )
-        self.last_direction = move.direction
-        self.phase = self.policy.phase
-        self.reason = move.reason
-        if move.direction == "stop":
-            self.running = False
-        return encode_direction(move.direction)
+        if undocking:
+            move_dir = "forward"
+            self.phase = "explore"
+            self.reason = "undock"
+            self.policy = MappingPolicyState()
+        else:
+            move, self.policy = next_mapping_move(
+                sample, hit, self.grid, self.policy, dt_s=dt_s
+            )
+            move_dir = move.direction
+            self.phase = self.policy.phase
+            self.reason = move.reason
+            if move.direction == "stop":
+                self.running = False
+        self._prev_bumper = raw_hit
+        self.last_direction = move_dir
+        return encode_direction(move_dir)

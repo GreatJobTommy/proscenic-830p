@@ -105,6 +105,12 @@ class TuyaLanAdapter:
             device.set_version(self.version)
         else:
             device.version = self.version
+        persist = getattr(device, "set_socketPersistent", None)
+        if callable(persist):
+            persist(True)
+        timeout = getattr(device, "set_socketTimeout", None)
+        if callable(timeout):
+            timeout(2)
         self._device = device
         return device
 

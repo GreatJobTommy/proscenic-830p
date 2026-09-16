@@ -71,6 +71,11 @@ class Proscenic830PVacuum(StateVacuumEntity):
     _attr_supported_features = _FEATURES
     _attr_fan_speed_list = [item.value for item in FanSpeed]
 
+    @property
+    def should_poll(self) -> bool:
+        session = getattr(self, "_session", None)
+        return not (session is not None and session.running)
+
     def __init__(
         self,
         name: str,
@@ -302,18 +307,29 @@ class Proscenic830PVacuum(StateVacuumEntity):
 
     async def _run_kartierung(self) -> None:
         assert self._session is not None
+        status = None
         try:
             for step in range(720):
                 if not self._session.running:
                     break
-                try:
-                    status = await self.hass.async_add_executor_job(self._controller.refresh)
-                except Exception:
-                    status = None
                 dps = self._session.tick(status)
-                await self.hass.async_add_executor_job(
-                    self._controller.direction, dps["26"]
-                )
+                try:
+                    await asyncio.wait_for(
+                        self.hass.async_add_executor_job(
+                            self._controller.direction, dps["26"]
+                        ),
+                        timeout=2.5,
+                    )
+                except Exception:
+                    pass
+                if step % 4 == 3:
+                    try:
+                        status = await asyncio.wait_for(
+                            self.hass.async_add_executor_job(self._controller.refresh),
+                            timeout=2.0,
+                        )
+                    except Exception:
+                        status = None
                 if step % 8 == 0:
                     await self.hass.async_add_executor_job(self._write_map_png)
                 self.async_write_ha_state()

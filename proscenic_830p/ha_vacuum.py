@@ -71,6 +71,11 @@ class Proscenic830PVacuum(StateVacuumEntity):
     _attr_supported_features = _FEATURES
     _attr_fan_speed_list = [item.value for item in FanSpeed]
 
+    @property
+    def should_poll(self) -> bool:
+        session = getattr(self, "_session", None)
+        return not (session is not None and session.running)
+
     def __init__(
         self,
         name: str,
@@ -271,6 +276,7 @@ class Proscenic830PVacuum(StateVacuumEntity):
         if self._kartierung_task is not None and not self._kartierung_task.done():
             return
         self._session.start()
+        await self.hass.async_add_executor_job(self._write_map_png)
         self._kartierung_task = self.hass.async_create_task(self._run_kartierung())
 
     async def async_stop_kartierung(self) -> None:
@@ -288,20 +294,44 @@ class Proscenic830PVacuum(StateVacuumEntity):
         if hasattr(self, "async_write_ha_state"):
             self.async_write_ha_state()
 
+    def _write_map_png(self) -> None:
+        if self._session is None or self.hass is None:
+            return
+        png = render_occupancy_png(
+            self._session.grid, pose=self._session.pose, cell_px=4
+        )
+        path = Path(self.hass.config.path("www", "proscenic_830p_karte.png"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png)
+        self._map_rev = int(time.time() * 1000)
+
     async def _run_kartierung(self) -> None:
         assert self._session is not None
+        status = None
         try:
-            for _ in range(720):
+            for step in range(720):
                 if not self._session.running:
                     break
-                try:
-                    status = await self.hass.async_add_executor_job(self._controller.refresh)
-                except Exception:
-                    status = None
                 dps = self._session.tick(status)
-                await self.hass.async_add_executor_job(
-                    self._controller.direction, dps["26"]
-                )
+                try:
+                    await asyncio.wait_for(
+                        self.hass.async_add_executor_job(
+                            self._controller.direction, dps["26"]
+                        ),
+                        timeout=2.5,
+                    )
+                except Exception:
+                    pass
+                if step % 4 == 3:
+                    try:
+                        status = await asyncio.wait_for(
+                            self.hass.async_add_executor_job(self._controller.refresh),
+                            timeout=2.0,
+                        )
+                    except Exception:
+                        status = None
+                if step % 8 == 0:
+                    await self.hass.async_add_executor_job(self._write_map_png)
                 self.async_write_ha_state()
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
@@ -310,6 +340,10 @@ class Proscenic830PVacuum(StateVacuumEntity):
             self._session.stop()
             try:
                 self._controller.direction("stop")
+            except Exception:
+                pass
+            try:
+                await self.hass.async_add_executor_job(self._write_map_png)
             except Exception:
                 pass
             self.async_write_ha_state()

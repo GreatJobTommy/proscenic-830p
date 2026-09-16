@@ -28,20 +28,40 @@ def test_session_start_marks_dock_and_png_is_png() -> None:
 
 
 def test_first_tick_without_bumper_drives_forward() -> None:
-    session = KartierungSession()
+    session = KartierungSession(undock_ticks=0)
     session.start()
     dps = session.tick(_status(hit=False), dt_s=0.2)
     assert dps == {"26": "forward"}
     assert session.phase == "explore"
 
 
+def test_undock_ignores_dock_bumper() -> None:
+    session = KartierungSession(undock_ticks=3)
+    session.start()
+    for _ in range(3):
+        dps = session.tick(_status(hit=True), dt_s=0.2)
+        assert dps == {"26": "forward"}
+        assert session.reason == "undock"
+    assert session.grid.report().occupied == 0
+
+
 def test_bumper_hit_backs_off_and_stamps_occupied() -> None:
-    session = KartierungSession()
+    session = KartierungSession(undock_ticks=0)
     session.start()
     session.tick(_status(hit=False), dt_s=0.2)
     dps = session.tick(_status(hit=True), dt_s=0.2)
     assert dps == {"26": "backward"}
     assert session.grid.report().occupied > 0
+    assert session.phase == "backoff"
+
+
+def test_sticky_bumper_does_not_retrigger_while_backing() -> None:
+    session = KartierungSession(undock_ticks=0)
+    session.start()
+    session.tick(_status(hit=False), dt_s=0.2)
+    session.tick(_status(hit=True), dt_s=0.2)
+    dps = session.tick(_status(hit=True), dt_s=0.2)
+    assert dps == {"26": "backward"}
     assert session.phase == "backoff"
 
 
