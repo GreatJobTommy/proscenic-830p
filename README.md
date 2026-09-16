@@ -79,7 +79,7 @@ ln -s /config/proscenic-830p/custom_components/proscenic_830p /config/custom_com
 
 Home Assistant Core / Container: `pip install git+https://github.com/GreatJobTommy/proscenic-830p.git` and copy or symlink `custom_components/proscenic_830p` into `<config>/custom_components/`. Restart HA.
 
-**Preferred:** Settings → Devices → Add integration → **Proscenic 830P**. Choose *ProscenicHome login* (same email/password as the app). The flow fetches `local_key` once and then talks LAN only; the password is not stored.
+**Preferred:** Settings → Devices → Add integration → **Proscenic 830P**. Choose *ProscenicHome login* (same email/password as the **app**, not an Apple ID). The flow fetches `local_key` once and then talks LAN only; the password is not stored. After too many wrong passwords Tuya locks the account for 5 minutes — wait, then try **once**. A 6-digit email code may appear if ProscenicHome has MFA on.
 
 ProscenicHome may list this unit as **D600** in the inbox while device info and the name **schlurp** are the 830P. The matcher accepts that listing (and Tuya sweeper category `sd`); it still prefers the known LAN id `bf4d77d05964608b34enbm` when present.
 

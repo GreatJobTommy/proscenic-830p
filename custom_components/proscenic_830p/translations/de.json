@@ -10,12 +10,19 @@
       },
       "login": {
         "title": "ProscenicHome",
-        "description": "ProscenicHome E-Mail oder Handynummer und das App-Passwort. Deutschland = Ländercode 49. Nur-Apple-Login braucht in der App eine gebundene E-Mail/Passwort.",
+        "description": "ProscenicHome E-Mail oder Handy und das App-Passwort (nicht die Apple-ID). Deutschland = Ländercode 49. Nach einer Sperre 5 Minuten warten und nur einmal versuchen.",
         "data": {
           "username": "E-Mail oder Handy",
           "password": "Passwort",
           "country_code": "Ländercode",
           "region": "Tuya-Region"
+        }
+      },
+      "mfa": {
+        "title": "ProscenicHome-Code",
+        "description": "Ein 6-stelliger Code wurde an die ProscenicHome-E-Mail geschickt. Einmal eintragen.",
+        "data": {
+          "mfa_code": "Code"
         }
       },
       "manual": {
@@ -32,7 +39,8 @@
       "invalid_auth": "ProscenicHome E-Mail/Passwort abgelehnt",
       "no_device": "Kein 830P auf diesem ProscenicHome-Konto",
       "cannot_connect": "ProscenicHome-API-Fehler — Details in den HA-Logs",
-      "too_frequent": "Zu viele Anfragen an ProscenicHome. Eine Minute warten, dann erneut einloggen."
+      "too_frequent": "Zu viele Anfragen an ProscenicHome. Eine Minute warten, dann erneut einloggen.",
+      "password_locked": "Zu viele falsche Passwörter. 5 Minuten warten, dann das App-Passwort nur einmal versuchen"
     },
     "abort": {
       "already_configured": "Dieser 830P ist bereits eingerichtet"

@@ -6,9 +6,11 @@ Password is never stored; only device_id + local_key + host are kept.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
@@ -56,10 +58,36 @@ class RateLimited(ProscenicOemError):
     pass
 
 
+class PasswordLocked(ProscenicOemError):
+    pass
+
+
+class MfaRequired(ProscenicOemError):
+    pass
+
+
+class UnsupportedApi(ProscenicOemError):
+    pass
+
+
 _RATE_LIMIT_CODES = {
     "REQUEST_TOO_FREQUENTLY_PLEASE_TRY_AGAIN_LATER",
     "REQUEST_TOO_FREQUENTLY",
     "REPEATED_REQUEST",
+}
+
+_PASSWORD_LOCK_PREFIX = "USER_PASSWD_ERROR_TIMES_TOO_MANY"
+
+_UNSUPPORTED_API_CODES = {
+    "API_OR_API_VERSION_WRONG",
+    "API_NOT_EXISTS",
+    "INVALID_API",
+    "FUNCTION_NOT_SUPPORT",
+}
+
+_MFA_CODES = {
+    "MFA_NEED_SEND_CODE",
+    "USER_NEED_MFA",
 }
 
 
@@ -94,6 +122,80 @@ def encrypt_password(modulus_str: str, exponent_str: str, password: str) -> str:
     return _plain_rsa_encrypt(
         _parse_int(modulus_str), _parse_int(exponent_str), passwd_hash
     ).hex()
+
+
+def _pkcs1_v15_encrypt(modulus: int, exponent: int, message: bytes) -> bytes:
+    k = (modulus.bit_length() + 7) // 8
+    if k < 12 or len(message) > k - 11:
+        raise ValueError("message too long for RSA key")
+    ps_len = k - len(message) - 3
+    ps = bytearray()
+    while len(ps) < ps_len:
+        ps.extend(b for b in secrets.token_bytes(ps_len - len(ps) + 8) if b != 0)
+    em = b"\x00\x02" + bytes(ps[:ps_len]) + b"\x00" + message
+    cipher = pow(int.from_bytes(em, "big"), exponent, modulus)
+    return cipher.to_bytes(k, "big")
+
+
+def encrypt_password_pkcs1(modulus_str: str, exponent_str: str, password: str) -> str:
+    passwd_hash = hashlib.md5(password.encode("utf-8")).hexdigest().encode("utf-8")
+    return _pkcs1_v15_encrypt(
+        _parse_int(modulus_str), _parse_int(exponent_str), passwd_hash
+    ).hex()
+
+
+def _der_len(data: bytes, index: int) -> tuple[int, int]:
+    first = data[index]
+    index += 1
+    if first < 0x80:
+        return first, index
+    count = first & 0x7F
+    value = int.from_bytes(data[index : index + count], "big")
+    return value, index + count
+
+
+def _der_integers(data: bytes) -> list[int]:
+    out: list[int] = []
+    index = 0
+    while index < len(data):
+        tag = data[index]
+        index += 1
+        if index >= len(data):
+            break
+        length, index = _der_len(data, index)
+        chunk = data[index : index + length]
+        index += length
+        if tag == 0x02:
+            out.append(int.from_bytes(chunk, "big"))
+        elif tag in (0x30, 0x03):
+            if tag == 0x03 and chunk[:1] == b"\x00":
+                chunk = chunk[1:]
+            out.extend(_der_integers(chunk))
+    return out
+
+
+def _rsa_from_pbkey(pb_key: str) -> tuple[int, int]:
+    text = (
+        pb_key.replace("-----BEGIN PUBLIC KEY-----", "")
+        .replace("-----END PUBLIC KEY-----", "")
+    )
+    text = "".join(text.split())
+    integers = _der_integers(base64.b64decode(text))
+    if len(integers) < 2:
+        raise ProscenicOemError("could not parse login pbKey")
+    return integers[-2], integers[-1]
+
+
+def rsa_from_token(token_info: Mapping[str, Any]) -> tuple[str, str]:
+    public_key = token_info.get("publicKey") or token_info.get("public_key")
+    exponent = token_info.get("exponent")
+    if public_key not in (None, "") and exponent not in (None, ""):
+        return str(public_key), str(exponent)
+    pb_key = token_info.get("pbKey") or token_info.get("pb_key")
+    if pb_key:
+        modulus, exp = _rsa_from_pbkey(str(pb_key))
+        return str(modulus), str(exp)
+    raise ProscenicOemError("login token missing RSA public key")
 
 
 def _parse_int(value: str) -> int:
@@ -225,14 +327,104 @@ class ProscenicOemApi:
         self._http_post = http_post
         self._sid: str | None = None
 
-    def login(self) -> str:
-        # German ProscenicHome accounts need countryCode 49; empty code
-        # often comes back as USER_PASSWD_WRONG.
+    def _account_username(self) -> str:
         if looks_like_email(self._username):
-            self._sid = self._login_email(self._country_code)
-        else:
-            self._sid = self._login_mobile(self._country_code)
+            return self._username
+        return normalize_mobile(self._username, self._country_code)
+
+    def login(self, mfa_code: str = "") -> str:
+        # ProscenicHome 4.x (ThingClips) issues a different RSA token than the
+        # legacy tuya.m.user.email.token.create path. Encrypting with the
+        # wrong token comes back as USER_PASSWD_WRONG even when the password
+        # is correct. Only fall back to the old API when the new token action
+        # does not exist — never after a wrong-password response.
+        try:
+            self._sid = self._login_thing(mfa_code)
+        except UnsupportedApi:
+            self._sid = self._login_legacy()
+        except MfaRequired:
+            if not mfa_code:
+                try:
+                    self._request_mfa()
+                except UnsupportedApi:
+                    pass
+            raise
         return self._sid
+
+    def _login_thing(self, mfa_code: str = "") -> str:
+        token_info = self._api(
+            "thing.m.user.username.token.get",
+            {
+                "countryCode": self._country_code,
+                "username": self._account_username(),
+                "isUid": False,
+            },
+            requires_sid=False,
+            version="2.0",
+        )
+        try:
+            return self._password_login_thing(token_info, mfa_code)
+        except UnsupportedApi as err:
+            raise ProscenicOemError(f"modern login action missing: {err}") from err
+
+    def _password_login_thing(self, token_info: Mapping[str, Any], mfa_code: str) -> str:
+        modulus, exponent = rsa_from_token(token_info)
+        try:
+            passwd = encrypt_password_pkcs1(modulus, exponent, self._password)
+        except ValueError as err:
+            raise ProscenicOemError(f"RSA encrypt failed: {err}") from err
+        options = json.dumps({"group": 1, "mfaCode": mfa_code or ""})
+        if looks_like_email(self._username):
+            action = "thing.m.user.email.password.login"
+            identity = {"email": self._username}
+        else:
+            action = "thing.m.user.mobile.password.login"
+            identity = {"mobile": self._account_username()}
+        login_info = self._api(
+            action,
+            {
+                "countryCode": self._country_code,
+                **identity,
+                "ifencrypt": 1,
+                "options": options,
+                "passwd": passwd,
+                "token": token_info["token"],
+            },
+            requires_sid=False,
+            version="3.0",
+        )
+        return str(login_info["sid"])
+
+    def _request_mfa(self) -> None:
+        token_info = self._api(
+            "thing.m.user.username.token.get",
+            {
+                "countryCode": self._country_code,
+                "username": self._account_username(),
+                "isUid": False,
+            },
+            requires_sid=False,
+            version="2.0",
+        )
+        modulus, exponent = rsa_from_token(token_info)
+        self._api(
+            "thing.m.user.username.mfa.code.get",
+            {
+                "countryCode": self._country_code,
+                "username": self._account_username(),
+                "passwd": encrypt_password_pkcs1(modulus, exponent, self._password),
+                "token": token_info["token"],
+                "ifencrypt": 1,
+                "options": json.dumps({"group": 1, "mfaCode": "null"}),
+            },
+            requires_sid=False,
+            version="1.0",
+        )
+
+    def _login_legacy(self) -> str:
+        if looks_like_email(self._username):
+            return self._login_email(self._country_code)
+        return self._login_mobile(self._country_code)
 
     def _login_email(self, country_code: str) -> str:
         token_info = self._api(
@@ -317,11 +509,12 @@ class ProscenicOemApi:
         payload: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
         requires_sid: bool = True,
+        version: str = API_VERSION,
     ) -> Any:
         params: dict[str, str] = {
             "a": action,
             "clientId": PROSCENIC_CLIENT_ID,
-            "v": API_VERSION,
+            "v": version,
             "time": str(int(time.time())),
         }
         if extra_params:
@@ -339,10 +532,16 @@ class ProscenicOemApi:
         if not body.get("success"):
             code = body.get("errorCode")
             msg = body.get("errorMsg") or code or "oem api error"
+            if str(code) in _MFA_CODES:
+                raise MfaRequired(f"{msg} ({code})")
             if code == "USER_PASSWD_WRONG":
                 raise InvalidAuthentication(str(msg))
+            if str(code).startswith(_PASSWORD_LOCK_PREFIX):
+                raise PasswordLocked(f"{msg} ({code})")
             if str(code) in _RATE_LIMIT_CODES:
                 raise RateLimited(f"{msg} ({code})")
+            if str(code) in _UNSUPPORTED_API_CODES:
+                raise UnsupportedApi(f"{msg} ({code})")
             raise ProscenicOemError(f"{msg} ({code})")
         return body.get("result")
 
@@ -352,6 +551,7 @@ class ProscenicOemApi:
         payload: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
         requires_sid: bool = True,
+        version: str = API_VERSION,
     ) -> Any:
         try:
             return self._api(
@@ -359,8 +559,15 @@ class ProscenicOemApi:
                 payload=payload,
                 extra_params=extra_params,
                 requires_sid=requires_sid,
+                version=version,
             )
         except RateLimited:
+            raise
+        except PasswordLocked:
+            raise
+        except InvalidAuthentication:
+            raise
+        except MfaRequired:
             raise
         except ProscenicOemError:
             return None
@@ -390,6 +597,7 @@ def discover_830p(
     http_post: HttpPost | None = None,
     hosts_by_gwid: Mapping[str, str] | None = None,
     country_code: str = "49",
+    mfa_code: str = "",
 ) -> dict[str, str]:
     """Login to ProscenicHome, return LAN config (password is not returned)."""
     from .constants import KNOWN_DEVICE_ID, KNOWN_UUID  # noqa: PLC0415
@@ -401,7 +609,7 @@ def discover_830p(
         http_post=http_post,
         country_code=country_code,
     )
-    api.login()
+    api.login(mfa_code=mfa_code)
     devices = api.list_devices()
     found = pick_vacuum(
         devices,

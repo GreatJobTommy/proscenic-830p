@@ -14,7 +14,14 @@ from homeassistant.core import HomeAssistant
 from .adapter import find_host_for_gw_id
 from .const import CONF_LOCAL_KEY, DEFAULT_NAME, DOMAIN
 from .constants import KNOWN_DEVICE_ID, TUYA_VERSION
-from .oem_cloud import InvalidAuthentication, ProscenicOemError, RateLimited, discover_830p
+from .oem_cloud import (
+    InvalidAuthentication,
+    MfaRequired,
+    PasswordLocked,
+    ProscenicOemError,
+    RateLimited,
+    discover_830p,
+)
 
 CONF_DEVICE_ID = "device_id"
 CONF_REGION = "region"
@@ -30,6 +37,10 @@ async def _lan_host(hass: HomeAssistant, device_id: str) -> str:
 
 class Proscenic830PConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._login_input: dict[str, Any] = {}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
@@ -53,35 +64,78 @@ class Proscenic830PConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_login(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
         if user_input is not None:
-            try:
-                discovered = await self.hass.async_add_executor_job(
-                    lambda: discover_830p(
-                        user_input[CONF_USERNAME],
-                        user_input[CONF_PASSWORD],
-                        region=user_input.get(CONF_REGION, "eu"),
-                        country_code=str(user_input.get(CONF_COUNTRY_CODE, "49")),
-                        device_id=KNOWN_DEVICE_ID,
-                    )
+            self._login_input = dict(user_input)
+            return await self._discover_from_login(user_input)
+        return self.async_show_form(
+            step_id="login",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_USERNAME): str,
+                    vol.Required(CONF_PASSWORD): str,
+                    vol.Optional(CONF_COUNTRY_CODE, default="49"): str,
+                    vol.Optional(CONF_REGION, default="eu"): vol.In(["eu", "us", "cn", "in"]),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_mfa(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            payload = dict(self._login_input)
+            payload["mfa_code"] = str(user_input.get("mfa_code", "")).strip()
+            return await self._discover_from_login(payload)
+        return self.async_show_form(
+            step_id="mfa",
+            data_schema=vol.Schema({vol.Required("mfa_code"): str}),
+            errors=errors,
+        )
+
+    async def _discover_from_login(self, user_input: dict[str, Any]):
+        errors: dict[str, str] = {}
+        try:
+            discovered = await self.hass.async_add_executor_job(
+                lambda: discover_830p(
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
+                    region=user_input.get(CONF_REGION, "eu"),
+                    country_code=str(user_input.get(CONF_COUNTRY_CODE, "49")),
+                    device_id=KNOWN_DEVICE_ID,
+                    mfa_code=str(user_input.get("mfa_code", "")),
                 )
-            except InvalidAuthentication as err:
-                _LOGGER.warning("ProscenicHome auth rejected: %s", err)
-                errors["base"] = "invalid_auth"
-            except RateLimited as err:
-                _LOGGER.warning("ProscenicHome rate limited: %s", err)
-                errors["base"] = "too_frequent"
-            except ProscenicOemError as err:
-                _LOGGER.warning("ProscenicHome discover failed: %s", err)
-                if "no Proscenic 830P" in str(err):
-                    errors["base"] = "no_device"
-                else:
-                    errors["base"] = "cannot_connect"
+            )
+        except InvalidAuthentication as err:
+            _LOGGER.warning("ProscenicHome auth rejected: %s", err)
+            errors["base"] = "invalid_auth"
+        except PasswordLocked as err:
+            _LOGGER.warning("ProscenicHome password locked: %s", err)
+            errors["base"] = "password_locked"
+        except RateLimited as err:
+            _LOGGER.warning("ProscenicHome rate limited: %s", err)
+            errors["base"] = "too_frequent"
+        except MfaRequired as err:
+            _LOGGER.info("ProscenicHome MFA required: %s", err)
+            return await self.async_step_mfa()
+        except ProscenicOemError as err:
+            _LOGGER.warning("ProscenicHome discover failed: %s", err)
+            if "no Proscenic 830P" in str(err):
+                errors["base"] = "no_device"
             else:
-                host = discovered.get("host") or await _lan_host(
-                    self.hass, discovered["device_id"]
-                )
-                if not host:
-                    host = "192.168.178.63"
-                return await self._create(discovered["name"], host, discovered)
+                errors["base"] = "cannot_connect"
+        else:
+            host = discovered.get("host") or await _lan_host(
+                self.hass, discovered["device_id"]
+            )
+            if not host:
+                host = "192.168.178.63"
+            return await self._create(discovered["name"], host, discovered)
+        step_id = "mfa" if user_input.get("mfa_code") else "login"
+        if step_id == "mfa":
+            return self.async_show_form(
+                step_id="mfa",
+                data_schema=vol.Schema({vol.Required("mfa_code"): str}),
+                errors=errors,
+            )
         return self.async_show_form(
             step_id="login",
             data_schema=vol.Schema(
