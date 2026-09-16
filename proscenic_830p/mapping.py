@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from typing import Mapping, Sequence
+from typing import Mapping
 
 from .constants import (
     BODY_RADIUS_MM,
     MAPPING_BUMPER_STAMP_MM,
     MAPPING_RESOLUTION_MM,
 )
-from .occupancy import OccupancyGrid, PoseSample, scan_probe
+from .live import live_mapping_session
+from .occupancy import OccupancyGrid, PoseSample
 from .probe import DEFAULT_SPEED_MM_S, DEFAULT_TURN_DEG_S, integrate_pose
 
 BACKOFF_MM = 220.0
@@ -195,28 +196,8 @@ def next_mapping_move(
 
 def run_mapping_pass(data: Mapping[str, object]) -> OccupancyGrid:
     """Fill a Kartierung grid from a fixture: mark dock, then pose+bumper stream."""
-    dock = data["dock"]  # type: ignore[index]
-    grid = OccupancyGrid(
-        resolution_mm=int(data.get("resolution_mm", MAPPING_RESOLUTION_MM)),
-        origin_x_mm=float(data.get("origin_x_mm", 0)),
-        origin_y_mm=float(data.get("origin_y_mm", 0)),
-        width_cells=int(data.get("width_cells", 80)),
-        height_cells=int(data.get("height_cells", 60)),
-        bumper_stamp_radius_mm=float(
-            data.get("bumper_stamp_radius_mm", MAPPING_BUMPER_STAMP_MM)
-        ),
-    )
-    grid.mark_dock(
-        float(dock["x_mm"]),  # type: ignore[index]
-        float(dock["y_mm"]),  # type: ignore[index]
-        float(dock.get("heading_deg", 0) or 0),  # type: ignore[union-attr]
-    )
-    raw_samples: Sequence[object] = data["samples"]  # type: ignore[assignment]
-    samples = [
-        s if isinstance(s, PoseSample) else PoseSample.from_mapping(s)  # type: ignore[arg-type]
-        for s in raw_samples
-    ]
-    return scan_probe(samples, grid=grid)
+    grid, _snapshots = live_mapping_session(data)
+    return grid
 
 
 def run_mapping_policy(

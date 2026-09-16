@@ -118,6 +118,16 @@ python -m proscenic_830p.launch_kartierung tests/fixtures/kartierung_post.json
 
 Output lists `DOCK_CELL` (charging station / start pose) and `OCCUPIED_CELL` (sticky obstacles). Two runs of the same fixture are identical.
 
+## Live map, coverage, and edge (Kanten)
+
+Watch the occupancy grid grow one pose+bumper sample at a time, then drive **only where the 330 mm body already fit** (free cells). A separate **Kanten** pass walks the occupied frontier with the body on free cells and a **front-left or front-right side brush** (55° on the 330 mm disk) against the edge — map geometry, not the Tuya `wallfollow` DP.
+
+```bash
+python -m proscenic_830p.launch_live tests/fixtures/kartierung_post.json
+```
+
+Output: growing `SNAPSHOT k known=…` lines, then `COVERAGE_POSE` and `EDGE_POSE`. Two runs match. Unknown cells stay unknown; onboard auto-clean still does not follow this map.
+
 ## Occupancy CLI
 
 ```bash

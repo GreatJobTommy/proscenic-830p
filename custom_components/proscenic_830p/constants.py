@@ -25,6 +25,9 @@ BUMPER_STAMP_RADIUS_MM = 60
 MAPPING_RESOLUTION_MM = 25
 MAPPING_BUMPER_STAMP_MM = 40
 DOCK_MARKER_RADIUS_MM = 80
+# Front-left / front-right side brushes on the 330 mm disk (from heading).
+SIDE_BRUSH_OFFSET_DEG = 55.0
+SIDE_BRUSH_RADIUS_MM = BODY_RADIUS_MM
 
 
 def can_climb(step_mm: float) -> bool:
