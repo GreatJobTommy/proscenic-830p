@@ -231,6 +231,18 @@ class Proscenic830PVacuum(StateVacuumEntity):
         del kwargs
         return self.send_command(command, params)
 
+    async def async_wall_follow(self) -> dict[str, object]:
+        return self.wall_follow()
+
+    async def async_single_room(self) -> dict[str, object]:
+        return self.single_room()
+
+    async def async_mop(self) -> dict[str, object]:
+        return self.mop()
+
+    async def async_remote_control(self, direction: str) -> dict[str, object]:
+        return self._controller.direction(direction)
+
 
 def build_vacuum(
     name: str,
@@ -269,3 +281,25 @@ async def async_setup_platform(
         unique_id=device_id,
     )
     async_add_entities([entity], True)
+    _register_extra_services()
+
+
+def _register_extra_services() -> None:
+    """Expose wall-follow / single-room / mop / remote-control on the HA platform."""
+    try:
+        from homeassistant.helpers import entity_platform  # type: ignore
+        import voluptuous as vol  # type: ignore
+    except ImportError:
+        return
+    try:
+        platform = entity_platform.async_get_current_platform()
+    except Exception:
+        return
+    platform.async_register_entity_service("wall_follow", {}, "async_wall_follow")
+    platform.async_register_entity_service("single_room", {}, "async_single_room")
+    platform.async_register_entity_service("mop", {}, "async_mop")
+    platform.async_register_entity_service(
+        "remote_control",
+        {vol.Required("direction"): str},
+        "async_remote_control",
+    )

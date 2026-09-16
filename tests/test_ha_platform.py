@@ -43,6 +43,12 @@ def test_ha_entity_start_dock_spot_use_protocol_mapping() -> None:
     assert sent[-1] == encode_command(Command.STOP)
     entity.set_fan_speed("strong")
     assert sent[-1] == encode_fan(FanSpeed.STRONG)
+    entity.send_command("wall_follow")
+    assert sent[-1] == encode_command(Command.WALL_FOLLOW)
+    entity.send_command("single_room")
+    assert sent[-1] == encode_command(Command.SINGLE_ROOM)
+    entity.send_command("mop")
+    assert sent[-1] == encode_command(Command.MOP)
 
 
 def test_ha_entity_is_the_platform_class() -> None:
