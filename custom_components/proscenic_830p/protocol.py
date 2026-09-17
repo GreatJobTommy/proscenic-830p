@@ -78,6 +78,22 @@ DP_CLEAN_AREA = "41"
 DP_CLEAN_TIME = "42"
 DP_SWEEP_OR_MOP = "49"
 
+KNOWN_DP_IDS = frozenset(
+    {
+        DP_POWER,
+        DP_FAULT,
+        DP_MODE,
+        DP_DIRECTION,
+        DP_FAN,
+        DP_STATE,
+        DP_BATTERY,
+        DP_CLEAN_RECORD,
+        DP_CLEAN_AREA,
+        DP_CLEAN_TIME,
+        DP_SWEEP_OR_MOP,
+    }
+)
+
 # 830 firmware spelling; 850T yaml uses "spiral". Encode the 830 value.
 SPOT_MODE_VALUE = "sprial"
 
@@ -135,6 +151,27 @@ def encode_fan(fan: FanSpeed) -> dict[str, str]:
 def encode_direction(direction: str) -> dict[str, str]:
     parsed = Direction(direction)
     return {DP_DIRECTION: parsed.value}
+
+
+def classify_dps(dps: Mapping[object, object]) -> dict[str, object]:
+    """Split a Tuya LAN DPS map into known 8xx keys vs extras.
+
+    A numeric extra DP is only a *candidate* for ranging/laser. Do not treat
+    it as a LiDAR stream until a live dump shows it tracking distance.
+    """
+    normalized = {str(key): value for key, value in dps.items()}
+    extra = {key: value for key, value in normalized.items() if key not in KNOWN_DP_IDS}
+    ranging_candidates = [
+        key
+        for key, value in extra.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    return {
+        "known": {key: normalized[key] for key in KNOWN_DP_IDS if key in normalized},
+        "extra": extra,
+        "ranging_candidate_dps": ranging_candidates,
+        "ranging_present": bool(ranging_candidates),
+    }
 
 
 def decode_status(dps: Mapping[object, object]) -> VacuumStatus:

@@ -21,7 +21,7 @@ mop:
 
 remote_control:
   name: Remote control
-  description: Direction overlay (forward/backward/turnleft/turnright/stop).
+  description: Direction overlay (forward/turnleft/turnright/stop). Live Kartierung does not send backward.
   target:
     entity:
       domain: vacuum
@@ -47,7 +47,7 @@ kartierung:
 
 stop_kartierung:
   name: Kartierung stoppen
-  description: Stop mapping and freeze the occupancy camera.
+  description: Stop mapping and freeze the occupancy picture on the vacuum.
   target:
     entity:
       domain: vacuum

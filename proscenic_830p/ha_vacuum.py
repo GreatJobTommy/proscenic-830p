@@ -16,7 +16,7 @@ from .kartierung_session import KartierungSession
 from .map_image import render_occupancy_png
 from .constants import FIRMWARE_MAIN, FIRMWARE_MCU, WIFI_BAND_GHZ
 from .controller import VacuumController
-from .protocol import FanSpeed, Fault, decode_status, ha_state
+from .protocol import FanSpeed, Fault, classify_dps, decode_status, ha_state
 
 SendDps = Callable[[Mapping[str, object]], object]
 
@@ -231,14 +231,24 @@ class Proscenic830PVacuum(StateVacuumEntity):
             attrs["kartierung_reason"] = self._session.reason
             attrs["occupied"] = report.occupied
             attrs["free"] = report.free
+            attrs["unknown"] = report.unknown
         if self._status is None:
             return attrs
+        attrs["battery"] = self._status.battery
+        attrs["work_state"] = (
+            self._status.work_state.name if self._status.work_state is not None else None
+        )
         attrs["mop_equipped"] = self._status.mop_equipped
         attrs["faults"] = (
             self._status.faults.name
             if self._status.faults is not Fault.NO_ERROR
             else None
         )
+        attrs["raw_dps"] = dict(self._status.raw)
+        classified = classify_dps(self._status.raw)
+        attrs["extra_dps"] = classified["extra"]
+        attrs["ranging_candidate_dps"] = classified["ranging_candidate_dps"]
+        attrs["ranging_present"] = classified["ranging_present"]
         if self._status.cleaned_area is not None:
             attrs["cleaned_area"] = self._status.cleaned_area
         if self._status.clean_time_min is not None:

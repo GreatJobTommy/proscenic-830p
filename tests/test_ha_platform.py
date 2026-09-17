@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from proscenic_830p.controller import VacuumController
 from proscenic_830p.ha_vacuum import Proscenic830PVacuum, build_vacuum
-from proscenic_830p.protocol import Command, FanSpeed, encode_command, encode_fan
+from proscenic_830p.kartierung_session import KartierungSession
+from proscenic_830p.protocol import Command, FanSpeed, encode_command, encode_direction, encode_fan
 
 
 def test_controller_start_pause_stop_dock_modes_fan(dps_payloads: dict) -> None:
@@ -56,6 +57,50 @@ def test_ha_entity_is_the_platform_class() -> None:
     entity = Proscenic830PVacuum(name="830P", controller=VacuumController(sent.append))
     entity.start()
     assert sent == [encode_command(Command.START)]
+
+
+def test_controller_and_entity_direction_overlay_only() -> None:
+    sent: list[dict] = []
+    ctl = VacuumController(send_dps=sent.append)
+    assert ctl.direction("forward") == {"26": "forward"}
+    assert ctl.direction("turnleft") == {"26": "turnleft"}
+    assert ctl.direction("stop") == {"26": "stop"}
+    assert sent == [
+        encode_direction("forward"),
+        encode_direction("turnleft"),
+        encode_direction("stop"),
+    ]
+    assert all(list(item.keys()) == ["26"] for item in sent)
+    entity_sent: list[dict] = []
+    entity = build_vacuum("830P", send_dps=entity_sent.append)
+    import asyncio
+
+    asyncio.run(entity.async_remote_control("forward"))
+    asyncio.run(entity.async_remote_control("turnleft"))
+    asyncio.run(entity.async_remote_control("stop"))
+    assert entity_sent == [
+        encode_direction("forward"),
+        encode_direction("turnleft"),
+        encode_direction("stop"),
+    ]
+
+
+def test_entity_live_attributes_include_raw_dps_and_occupancy(dps_payloads: dict) -> None:
+    session = KartierungSession(undock_ticks=0, live_drive=True)
+    session.start()
+    entity = build_vacuum("830P", send_dps=lambda dps: None, session=session)
+    entity.apply_status(dps_payloads["status_live_with_extra"])
+    attrs = entity.extra_state_attributes
+    assert attrs["battery"] == 81
+    assert attrs["faults"] is None
+    assert attrs["occupied"] == session.grid.report().occupied
+    assert attrs["free"] == session.grid.report().free
+    assert attrs["unknown"] == session.grid.report().unknown
+    assert attrs["raw_dps"]["99"] == 42
+    assert attrs["extra_dps"]["99"] == 42
+    assert "99" in attrs["ranging_candidate_dps"]
+    entity.apply_status(dps_payloads["status_fault_bumper"])
+    assert entity.extra_state_attributes["faults"] == "COLLISION_SENSOR"
 
 
 def test_entity_status_from_dps_fixture(dps_payloads: dict) -> None:
@@ -115,6 +160,18 @@ def test_async_setup_platform_mocked_hass_uses_protocol_mapping() -> None:
         encode_command(Command.DOCK),
         encode_command(Command.SPOT),
     ]
+
+
+def test_kartierung_and_remote_are_on_vacuum_no_camera() -> None:
+    from custom_components.proscenic_830p import PLATFORMS
+
+    assert "vacuum" in PLATFORMS
+    assert "camera" not in PLATFORMS
+    entity = build_vacuum("830P", send_dps=lambda dps: None, session=KartierungSession())
+    assert hasattr(entity, "async_start_kartierung")
+    assert hasattr(entity, "async_stop_kartierung")
+    assert hasattr(entity, "async_remote_control")
+    assert hasattr(entity, "entity_picture")
 
 
 def test_custom_component_platform_reexports_same_class() -> None:

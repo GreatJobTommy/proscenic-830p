@@ -14,6 +14,7 @@ from proscenic_830p.protocol import (
     Fault,
     FanSpeed,
     WorkState,
+    classify_dps,
     decode_status,
     encode_command,
     encode_direction,
@@ -126,6 +127,24 @@ def test_decode_accepts_int_or_str_dp_keys() -> None:
     assert status.battery == 87
     assert status.work_state is WorkState.CLEAN_SMART
     assert status.fan is FanSpeed.STRONG
+
+
+def test_decode_preserves_unknown_extra_dp_and_classifies_ranging(dps_payloads: dict) -> None:
+    payload = dps_payloads["status_live_with_extra"]
+    status = decode_status(payload)
+    assert status.battery == 81
+    assert status.work_state is WorkState.IDLE
+    assert status.faults is Fault.NO_ERROR
+    assert status.raw["99"] == 42
+    assert "99" in status.raw
+    classified = classify_dps(status.raw)
+    assert classified["extra"]["99"] == 42
+    assert "99" in classified["ranging_candidate_dps"]
+    assert classified["ranging_present"] is True
+    known_payload = dps_payloads["status_smart_cleaning"]
+    none = classify_dps(known_payload)
+    assert none["extra"] == {}
+    assert none["ranging_present"] is False
 
 
 def test_encode_direction_overlay() -> None:

@@ -83,6 +83,20 @@
     "39": 66,
     "49": "mop"
   },
+  "status_live_with_extra": {
+    "1": true,
+    "11": 0,
+    "25": "smart",
+    "26": "stop",
+    "27": "normal",
+    "38": 6,
+    "39": 81,
+    "40": "rec",
+    "41": 3,
+    "42": 5,
+    "49": "sweep",
+    "99": 42
+  },
   "commands": {
     "start": {"25": "smart"},
     "pause_resume_smart": {"25": "smart"},
